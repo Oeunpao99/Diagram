@@ -1,0 +1,764 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Diagram Copilot — Tailwind v4 entry.
+   Design tokens are CSS custom properties (light/dark/accent); @theme inline
+   maps them onto Tailwind utilities so `bg-surface`, `text-ink` etc. follow
+   the active theme automatically. Node shapes, React Flow cosmetics and the
+   keyframes live here because they can't be expressed as utilities.
+   ========================================================================== */
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-strong: var(--ink-strong);
+  --color-slate: var(--slate);
+  --color-slate-soft: var(--slate-soft);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-green: var(--green);
+  --color-green-strong: var(--green-strong);
+  --color-green-deep: var(--green-deep);
+  --color-green-soft: var(--green-soft);
+  --color-green-line: var(--green-line);
+  --color-on-accent: var(--on-accent);
+  --color-on-ink: var(--on-ink);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
+  --color-violet-soft: var(--violet-soft);
+
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+/* ------------------------------------------------------------------ tokens */
+
+:root {
+  --paper: #f4f6f7;
+  --surface: #ffffff;
+  --surface-2: #fafcfb;
+
+  --ink: #10171a;
+  --ink-strong: #0b1012;
+  --slate: #56616a;
+  --slate-soft: #7d8a92;
+  --line: #e3e8ea;
+  --line-strong: #cfd7da;
+
+  --green: #0d9f6e;
+  --green-strong: #0b7e56;
+  --green-deep: #0c6a4c;
+  --green-soft: #e7f6f0;
+  --green-line: #bfe9d9;
+  --green-ring: rgba(13, 159, 110, 0.14);
+
+  --on-accent: #ffffff;
+  --on-ink: #ffffff;
+
+  --dot: #d8dfe2;
+  --minimap-mask: rgba(244, 246, 247, 0.75);
+
+  --violet-soft: #eef2ff;
+  --amber: #b06f0e;
+  --amber-soft: #f7efdc;
+  --red: #c4372f;
+  --red-soft: #f9e7e5;
+
+  --radius-xs: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 26, 0.05);
+  --shadow-2: 0 2px 10px rgba(16, 24, 26, 0.07);
+  --shadow-3: 0 16px 40px rgba(16, 24, 26, 0.14);
+
+  --topbar: 56px;
+  --statusbar: 28px;
+  --rail: 272px;
+  --panel: 360px;
+
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:root[data-theme="dark"] {
+  --paper: #0e1416;
+  --surface: #151d20;
+  --surface-2: #1b2427;
+
+  --ink: #e8eef0;
+  --ink-strong: #f6fafb;
+  --slate: #9aa8ae;
+  --slate-soft: #78878e;
+  --line: #263136;
+  --line-strong: #35444a;
+
+  --green: #1fb884;
+  --green-strong: #31c795;
+  --green-deep: #7fe0c0;
+  --green-soft: #122a24;
+  --green-line: #1d4d40;
+  --green-ring: rgba(31, 184, 132, 0.22);
+
+  --on-accent: #06231a;
+  --on-ink: #0e1416;
+
+  --dot: #2b383d;
+  --minimap-mask: rgba(14, 20, 22, 0.78);
+
+  --violet-soft: #1b1f3a;
+  --amber: #e0a445;
+  --amber-soft: #2e2412;
+  --red: #f08074;
+  --red-soft: #2f1a18;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1416;
+    --surface: #151d20;
+    --surface-2: #1b2427;
+    --ink: #e8eef0;
+    --ink-strong: #f6fafb;
+    --slate: #9aa8ae;
+    --slate-soft: #78878e;
+    --line: #263136;
+    --line-strong: #35444a;
+    --green: #1fb884;
+    --green-strong: #31c795;
+    --green-deep: #7fe0c0;
+    --green-soft: #122a24;
+    --green-line: #1d4d40;
+    --green-ring: rgba(31, 184, 132, 0.22);
+    --on-accent: #06231a;
+    --on-ink: #0e1416;
+    --dot: #2b383d;
+    --minimap-mask: rgba(14, 20, 22, 0.78);
+    --violet-soft: #1b1f3a;
+    --amber: #e0a445;
+    --amber-soft: #2e2412;
+    --red: #f08074;
+    --red-soft: #2f1a18;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 2px 10px rgba(0, 0, 0, 0.45);
+    --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root[data-accent="violet"] {
+  --green: #6d5ae0;
+  --green-strong: #5a46d6;
+  --green-deep: #4a37bd;
+  --green-soft: #eeebfd;
+  --green-line: #d5cdf8;
+  --green-ring: rgba(109, 90, 224, 0.16);
+}
+:root[data-theme="dark"][data-accent="violet"] {
+  --green: #8f7cf0;
+  --green-strong: #a08ff5;
+  --green-deep: #c3b6fa;
+  --green-soft: #1e1a35;
+  --green-line: #372f5e;
+  --green-ring: rgba(143, 124, 240, 0.24);
+  --on-accent: #16102e;
+}
+:root[data-accent="blue"] {
+  --green: #2563eb;
+  --green-strong: #1d4fd0;
+  --green-deep: #1a43ae;
+  --green-soft: #e8effe;
+  --green-line: #c6d8fb;
+  --green-ring: rgba(37, 99, 235, 0.16);
+}
+:root[data-theme="dark"][data-accent="blue"] {
+  --green: #5b92f7;
+  --green-strong: #74a4f9;
+  --green-deep: #a8c7fc;
+  --green-soft: #12203a;
+  --green-line: #233a63;
+  --green-ring: rgba(91, 146, 247, 0.24);
+  --on-accent: #0a1526;
+}
+:root[data-accent="amber"] {
+  --green: #b06f0e;
+  --green-strong: #965d09;
+  --green-deep: #7c4c07;
+  --green-soft: #fbf1de;
+  --green-line: #f0dcb2;
+  --green-ring: rgba(176, 111, 14, 0.16);
+}
+:root[data-theme="dark"][data-accent="amber"] {
+  --green: #d99a33;
+  --green-strong: #e5aa4b;
+  --green-deep: #f2c77f;
+  --green-soft: #2c2210;
+  --green-line: #4c3a1a;
+  --green-ring: rgba(217, 154, 51, 0.24);
+  --on-accent: #241a06;
+}
+:root[data-accent="rose"] {
+  --green: #c4372f;
+  --green-strong: #a92c25;
+  --green-deep: #8d241e;
+  --green-soft: #fbeae8;
+  --green-line: #f4cdc9;
+  --green-ring: rgba(196, 55, 47, 0.16);
+}
+:root[data-theme="dark"][data-accent="rose"] {
+  --green: #ec7466;
+  --green-strong: #f08a7e;
+  --green-deep: #f7b4ac;
+  --green-soft: #301816;
+  --green-line: #522721;
+  --green-ring: rgba(236, 116, 102, 0.24);
+  --on-accent: #2a0f0c;
+}
+
+/* ------------------------------------------------------------- base reset */
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    margin: 0;
+    height: 100%;
+    background: var(--paper);
+    font-size: 13px;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  svg {
+    display: block;
+  }
+}
+
+/* ------------------------------------------------------------ scroll hiding */
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ keyframes */
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes sel-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rail-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rehearse-stroke {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes rehearse-pop {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes typing {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* --------------------------------------------------------------- rehears */
+
+.rehearse {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.rehearse svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.rehearse path,
+.rehearse polygon,
+.rehearse circle,
+.rehearse ellipse,
+.rehearse rect {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px rgba(13, 159, 110, 0.5));
+}
+
+.rehearse polygon {
+  fill: var(--green);
+  stroke: none;
+}
+
+.rehearse circle {
+  fill: rgba(13, 159, 110, 0.06);
+}
+
+/* -------------------------------------------------------------- btn spin */
+
+.btn__spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  opacity: 0.85;
+  animation: btn-spin 0.75s linear infinite;
+}
+
+/* typing indicator dots */
+
+.typing {
+  display: inline-flex;
+  gap: 3px;
+  padding: 2px 0;
+}
+
+.typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--slate-soft);
+  animation: typing 1s ease-in-out infinite;
+}
+
+.typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* ------------------------------------------------------------- color input */
+
+.color-custom__input {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 7px;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.color-custom__input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-custom__input::-webkit-color-swatch {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 7px;
+}
+
+.color-custom__input::-moz-color-swatch {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 7px;
+}
+
+/* --------------------------------------------------------- react flow skin */
+
+.canvas-wrap .react-flow {
+  background: var(--paper);
+}
+
+.react-flow__attribution {
+  background: transparent;
+  font-size: 9px;
+  color: var(--slate-soft);
+}
+
+.react-flow__controls {
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--slate);
+  width: 26px;
+  height: 26px;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--surface-2);
+}
+
+.react-flow__minimap {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  background: var(--surface);
+}
+
+.react-flow__minimap-mask {
+  fill: var(--minimap-mask);
+}
+
+.react-flow__minimap-node {
+  fill: var(--green);
+}
+
+.react-flow__background pattern circle {
+  fill: var(--dot);
+}
+
+.react-flow__edge-path {
+  stroke: var(--slate);
+  stroke-width: 1.6;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--green);
+}
+
+.react-flow__edge-text {
+  font-size: 10px;
+  font-weight: 550;
+  fill: var(--ink);
+}
+
+.react-flow__edge-textbg {
+  fill: var(--paper);
+  rx: 5px;
+}
+
+/* -------------------------------------------------------------- node shapes */
+
+.node {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: 0 1px 2px rgba(16, 24, 26, 0.05);
+  transition: box-shadow 130ms ease;
+}
+
+.node.is-selected {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px var(--green-ring);
+}
+
+.node.is-selected::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border: 1.5px solid var(--green);
+  border-radius: calc(var(--radius) + 5px);
+  pointer-events: none;
+}
+
+.node__label {
+  position: relative;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.node__image {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.node--pill {
+  border-radius: var(--radius-pill);
+  background: var(--ink);
+  color: var(--on-ink);
+}
+
+.node--diamond {
+  transform: rotate(45deg);
+  border-radius: 4px;
+}
+
+.node--diamond .node__label {
+  transform: rotate(-45deg);
+  font-size: 11px;
+}
+
+.node--cylinder {
+  border-radius: 12px / 24px;
+  background: #f1f6f4;
+}
+
+.node--doc {
+  border-radius: var(--radius) var(--radius) 3px 3px;
+  border-bottom-width: 3px;
+  border-bottom-style: double;
+}
+
+.node--para {
+  transform: skewX(-12deg);
+}
+
+.node--para .node__label {
+  transform: skewX(12deg);
+}
+
+.node--cloud {
+  border-radius: 24px;
+  background: #f1f6f4;
+}
+
+.node--actor {
+  border-radius: 46% 46% var(--radius) var(--radius);
+}
+
+.node--note {
+  border-style: dashed;
+  background: #fbfaf2;
+  font-size: 11px;
+}
+
+.node--text-only {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+  justify-content: flex-start;
+  padding: 2px 4px;
+}
+
+.node--kind-decision {
+  border-color: var(--amber);
+}
+
+.node--kind-database,
+.node--kind-data {
+  border-color: #3f7a63;
+}
+
+.node--kind-service,
+.node--kind-system {
+  border-color: #3d6c8c;
+}
+
+.node__port {
+  width: 7px;
+  height: 7px;
+  background: var(--surface);
+  border: 1.5px solid var(--green);
+}
+
+.node__port:hover {
+  border-color: var(--green-deep);
+}
+
+.node__corner {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--surface);
+  border: 1.5px solid var(--green);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.node__corner--tl {
+  top: -6px;
+  left: -6px;
+}
+
+.node__corner--tr {
+  top: -6px;
+  right: -6px;
+}
+
+.node__corner--bl {
+  bottom: -6px;
+  left: -6px;
+}
+
+.node__corner--br {
+  bottom: -6px;
+  right: -6px;
+}
+
+/* swimlane bands */
+
+.lane {
+  border: 1px solid var(--line);
+  border-left: 3px solid #9fc7b6;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.lane__title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #3f7a63;
+  padding: 8px 12px;
+}
+
+.lane--group-label {
+  border-left-color: var(--green);
+  border-left-width: 2px;
+  background: rgba(231, 246, 240, 0.4);
+}
+
+/* ---------------------------------------------------------------- banner */
+
+.banner {
+  position: fixed;
+  bottom: 40px;
+  left: 18px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 480px;
+  background: var(--ink);
+  color: var(--on-ink);
+  padding: 11px 14px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-3);
+}
+
+.banner button {
+  border: none;
+  background: none;
+  color: #7fd9b4;
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------ focus rings */
+
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -34,11 +34,11 @@ export default function Register() {
         </>
       }
     >
-      <form className="auth__form" onSubmit={submit} noValidate>
-        <label className="field">
-          <span className="field__label">Name</span>
+      <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate">Name</span>
           <input
-            className="field__input"
+            className="w-full rounded-md border border-line-strong bg-surface px-3 py-[9px] text-sm text-ink transition-[border-color,box-shadow] outline-none focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)]"
             autoComplete="name"
             required
             value={name}
@@ -49,10 +49,10 @@ export default function Register() {
           />
         </label>
 
-        <label className="field">
-          <span className="field__label">Email</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate">Email</span>
           <input
-            className="field__input"
+            className="w-full rounded-md border border-line-strong bg-surface px-3 py-[9px] text-sm text-ink transition-[border-color,box-shadow] outline-none focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)]"
             type="email"
             autoComplete="email"
             required
@@ -64,10 +64,10 @@ export default function Register() {
           />
         </label>
 
-        <label className="field">
-          <span className="field__label">Password</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-slate">Password</span>
           <input
-            className="field__input"
+            className="w-full rounded-md border border-line-strong bg-surface px-3 py-[9px] text-sm text-ink transition-[border-color,box-shadow] outline-none focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)]"
             type="password"
             autoComplete="new-password"
             required
@@ -77,19 +77,19 @@ export default function Register() {
               clearError();
             }}
           />
-          <span className={`field__hint${tooShort ? " field__hint--warn" : ""}`}>
+          <span className={`text-[11px] ${tooShort ? "text-amber" : "text-slate-soft"}`}>
             At least {MIN_PASSWORD} characters.
           </span>
         </label>
 
         {error && (
-          <p className="field__error" role="alert">
+          <p className="m-0 rounded-md bg-red-soft px-3 py-[9px] text-[13px] text-red" role="alert">
             {error}
           </p>
         )}
 
         <button
-          className="btn btn--accent btn--block"
+          className="inline-flex w-full items-center justify-center gap-[7px] whitespace-nowrap rounded-md border border-green bg-green px-3 py-1.5 text-[12.5px] font-[550] text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
           type="submit"
           disabled={busy || tooShort}
         >

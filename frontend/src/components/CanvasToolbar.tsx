@@ -51,51 +51,63 @@ export function CanvasToolbar({
   const busy = useDiagram((s) => s.busy);
 
   return (
-    <div className="canvas-toolbar" role="toolbar" aria-label="Canvas tools">
+    <div
+      className="absolute left-1/2 top-[14px] z-[8] flex -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-[10px] border border-line bg-surface p-1 shadow-2"
+      role="toolbar"
+      aria-label="Canvas tools"
+    >
       {TOOLS.map((item) => (
         <button
           key={item.id}
-          className={`tool ${tool === item.id ? "is-active" : ""}`}
+          className={`group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5 ${tool === item.id ? "bg-green-soft text-green-deep" : ""}`}
           onClick={() => onTool(item.id)}
           title={item.label}
           aria-pressed={tool === item.id}
         >
           {item.icon()}
-          <span className="tool__tip">{item.label}</span>
+          <span className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-20 -translate-x-1/2 -translate-y-0.5 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-on-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            {item.label}
+          </span>
         </button>
       ))}
 
-      <div className="canvas-toolbar__end">
+      <div className="ml-1.5 flex items-center gap-0.5 border-l border-line pl-1.5 max-[900px]:hidden">
         <button
-          className="tool"
+          className="group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5"
           title="Auto layout"
           onClick={() => void autoLayout()}
           disabled={empty || busy !== null}
         >
           <Layers />
           Auto Layout
-          <span className="tool__tip">Re-arrange automatically</span>
+          <span className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-20 -translate-x-1/2 -translate-y-0.5 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-on-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            Re-arrange automatically
+          </span>
         </button>
-        <span className="tool__sep" />
-        <div className="zoom">
+        <span className="mx-1 my-[3px] w-px self-stretch bg-line" />
+        <div className="inline-flex items-center gap-px text-slate">
           <button
-            className="zoom__btn"
+            className="grid size-6 place-items-center rounded-md border-none bg-transparent text-slate hover:bg-paper hover:text-ink [&_svg]:size-[13px]"
             onClick={() => void zoomOut({ duration: 160 })}
             title="Zoom out"
+            aria-label="Zoom out"
           >
             <ZoomOut />
           </button>
-          <span className="zoom__value">{Math.round(zoom * 100)}%</span>
+          <span className="w-11 text-center text-[11.5px] font-semibold tabular-nums tracking-[0.02em] text-ink">
+            {Math.round(zoom * 100)}%
+          </span>
           <button
-            className="zoom__btn"
+            className="grid size-6 place-items-center rounded-md border-none bg-transparent text-slate hover:bg-paper hover:text-ink [&_svg]:size-[13px]"
             onClick={() => void zoomIn({ duration: 160 })}
             title="Zoom in"
+            aria-label="Zoom in"
           >
             <ZoomIn />
           </button>
         </div>
         <button
-          className="tool"
+          className="group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5"
           onClick={() => void fitView({ padding: 0.2, duration: 260 })}
           title="Fit canvas"
         >

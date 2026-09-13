@@ -14,24 +14,19 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fromFlow, makeNode, toFlow, type FlowNode } from "../api/adapter";
-import type { NodeKind } from "../api/types";
+import { fromFlow, makeNode, toFlow, type FlowNode, type FlowNodeData } from "../api/adapter";
+import type { DiagramDoc, NodeKind } from "../api/types";
 import { useDiagram } from "../store/useDiagram";
 import { useSettings } from "../store/useSettings";
 import { AiSuggestion } from "./AiSuggestion";
 import { AssetsDock } from "./AssetsDock";
 import { CanvasToolbar, type Tool } from "./CanvasToolbar";
+import { RehearsalOverlay } from "./RehearsalOverlay";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { nodeTypes } from "./nodes";
 
-const SHAPE_CYCLE: NodeKind[] = [
-  "process",
-  "decision",
-  "document",
-  "database",
-  "data",
-  "note",
-];
+/** AI operations whose result gets the "pen is drawing this" rehearsal. */
+const REHEARSE_ON_BUSY = new Set(["generating", "laying-out", "editing"]);
 
 export function Canvas() {
   const doc = useDiagram((s) => s.doc);
@@ -49,10 +44,17 @@ export function Canvas() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [tool, setTool] = useState<Tool>("select");
   const [dropActive, setDropActive] = useState(false);
+  const busy = useDiagram((s) => s.busy);
+  const [rehearsal, setRehearsal] = useState<{
+    key: number;
+    doc: DiagramDoc;
+    transform: [number, number, number];
+  } | null>(null);
 
-  // The doc is the source of truth; the canvas mirrors it. A ref guards against
-  // the write-back effect bouncing our own change straight back at us.
   const syncing = useRef(false);
+  const prevBusy = useRef<string | null>(null);
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
 
   useEffect(() => {
     const flow = toFlow(doc);
@@ -65,6 +67,26 @@ export function Canvas() {
     }, 60);
     return () => window.clearTimeout(id);
   }, [doc, setNodes, setEdges, fitView]);
+
+  // When an AI generation / layout / edit settles, replay the new diagram as a
+  // hand-drawn sketch: shapes render first, then the connectors trace between.
+  useEffect(() => {
+    const was = prevBusy.current;
+    prevBusy.current = busy;
+    if (busy !== null || !was || !REHEARSE_ON_BUSY.has(was)) return;
+    const id = window.setTimeout(() => {
+      // Let React Flow finish swapping nodes + the fitView settle, then capture
+      // a stable snapshot so the strokes land exactly on the diagram.
+      const current = useDiagram.getState().doc;
+      if (current.nodes.length < 2) return;
+      setRehearsal({
+        key: Date.now(),
+        doc: current,
+        transform: transformRef.current,
+      });
+    }, 560);
+    return () => window.clearTimeout(id);
+  }, [busy]);
 
   const commit = useCallback(() => {
     if (syncing.current) return;
@@ -95,6 +117,62 @@ export function Canvas() {
     setDoc({ ...current, nodes: [...current.nodes, makeNode(spec)] });
   };
 
+  /* --------------------------------------------- click-to-place tools */
+  // "select", "hand" and "connector" don't place anything on a pane click —
+  // connector's whole job is dragging between two ports, and click-placing
+  // under it would fight that. Everything else drops one element and hops
+  // back to "select" so you don't keep stamping out copies by accident.
+
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageDropPoint = useRef<{ x: number; y: number } | null>(null);
+
+  const onPaneClick = (event: React.MouseEvent) => {
+    if (tool === "select" || tool === "hand" || tool === "connector" || tool === "group") return;
+    const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+
+    if (tool === "image") {
+      imageDropPoint.current = point;
+      imageInputRef.current?.click();
+      return;
+    }
+
+    const PLACEMENT: Partial<Record<Tool, { kind: NodeKind; label: string; textOnly?: boolean }>> = {
+      node: { kind: "process", label: "Process" },
+      text: { kind: "note", label: "Text", textOnly: true },
+      shape: { kind: "decision", label: "Decision" },
+    };
+    const spec = PLACEMENT[tool];
+    if (!spec) return;
+
+    insertAt({
+      id: `node_${Date.now().toString(36)}`,
+      label: spec.label,
+      kind: spec.kind,
+      position: point,
+      style: spec.textOnly ? { textOnly: true } : undefined,
+    });
+    setTool("select");
+  };
+
+  const onImageFileChosen = (file: File | undefined) => {
+    if (file && imageDropPoint.current) {
+      const point = imageDropPoint.current;
+      const reader = new FileReader();
+      reader.onload = () => {
+        insertAt({
+          id: `img_${Date.now().toString(36)}`,
+          label: file.name,
+          kind: "note",
+          position: point,
+          imageUrl: String(reader.result),
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+    imageDropPoint.current = null;
+    setTool("select");
+  };
+
   const onCanvasDrop = (event: React.DragEvent) => {
     event.preventDefault();
     setDropActive(false);
@@ -106,6 +184,10 @@ export function Canvas() {
       service: "Server",
       database: "Database",
       cloud: "Cloud",
+      process: "Process",
+      decision: "Decision",
+      document: "Document",
+      queue: "Queue",
     };
     insertAt({
       id: `node_${Date.now().toString(36)}`,
@@ -153,15 +235,30 @@ export function Canvas() {
     setSelection([]);
   };
 
-  const cycleSelectedShape = () => {
+  const setSelectedShape = (kind: NodeKind) => {
     const current = useDiagram.getState().doc;
     const ids = selNodeIds();
-    const nodes = current.nodes.map((n) => {
-      if (!ids.includes(n.id)) return n;
-      const index = SHAPE_CYCLE.indexOf(n.kind);
-      return { ...n, kind: SHAPE_CYCLE[(index + 1) % SHAPE_CYCLE.length] };
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => (ids.includes(n.id) ? { ...n, kind } : n)),
     });
-    setDoc({ ...current, nodes });
+  };
+
+  const setSelectedColor = (color: string | null) => {
+    const current = useDiagram.getState().doc;
+    const ids = selNodeIds();
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const style = { ...(n.style ?? {}) };
+        if (color === null) delete style.color;
+        else style.color = color;
+        return { ...n, style };
+      }),
+    });
   };
 
   const editSelected = () => {
@@ -188,11 +285,13 @@ export function Canvas() {
         }
       : null;
 
+  const selData = selectedNode?.data as FlowNodeData | undefined;
+
   const panOnDrag = tool !== "select";
 
   return (
     <div
-      className="canvas-wrap"
+      className="absolute inset-0"
       onDragOver={(event) => {
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
@@ -214,6 +313,7 @@ export function Canvas() {
         onNodesDelete={commit}
         onConnect={onConnect}
         onSelectionChange={onSelectionChange}
+        onPaneClick={onPaneClick}
         nodesDraggable={tool === "select"}
         nodesConnectable={tool === "select" || tool === "connector"}
         elementsSelectable={tool === "select" || tool === "hand"}
@@ -242,7 +342,31 @@ export function Canvas() {
         {prefs.minimap && <MiniMap pannable zoomable nodeStrokeWidth={2} />}
       </ReactFlow>
 
-      {dropActive && <div className="drop-hint">Drop asset onto canvas</div>}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          onImageFileChosen(event.target.files?.[0]);
+          event.target.value = "";
+        }}
+      />
+
+      {dropActive && (
+        <div className="pointer-events-none absolute inset-0 z-[6] grid place-items-center bg-[rgba(13,159,110,0.1)] text-[13px] font-semibold tracking-[0.01em] text-green-deep">
+          Drop asset onto canvas
+        </div>
+      )}
+
+      {rehearsal && (
+        <RehearsalOverlay
+          key={rehearsal.key}
+          doc={rehearsal.doc}
+          transform={rehearsal.transform}
+          onDone={() => setRehearsal(null)}
+        />
+      )}
 
       <CanvasToolbar tool={tool} onTool={setTool} />
       <AssetsDock />
@@ -252,11 +376,14 @@ export function Canvas() {
         <SelectionToolbar
           x={marker.x}
           y={marker.y}
+          shape={selData?.kind ?? "process"}
+          color={typeof selData?.style?.color === "string" ? selData.style.color : null}
           onEdit={editSelected}
           onDuplicate={duplicateSelected}
-          onChangeShape={cycleSelectedShape}
           onConnect={() => setTool("connector")}
           onDelete={deleteSelected}
+          onSetShape={setSelectedShape}
+          onSetColor={setSelectedColor}
         />
       )}
     </div>

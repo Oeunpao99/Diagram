@@ -11,6 +11,7 @@ export interface NewNodeSpec {
   lane?: string | null;
   imageUrl?: string | null;
   size?: { width: number; height: number };
+  style?: Record<string, unknown>;
 }
 
 /** A complete DiagramNode with defaults, for canvas insertions (assets, drops). */
@@ -23,7 +24,7 @@ export function makeNode(spec: NewNodeSpec): DiagramNode {
     lane: spec.lane ?? null,
     position: spec.position,
     size: spec.size ?? (spec.imageUrl ? { width: 200, height: 140 } : { width: 170, height: 64 }),
-    style: {},
+    style: spec.style ?? {},
     icon: null,
     image_url: spec.imageUrl ?? null,
     locked: false,
@@ -36,6 +37,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   description?: string | null;
   lane?: string | null;
   imageUrl?: string | null;
+  style?: DiagramNode["style"];
   width: number;
   height: number;
 }
@@ -89,6 +91,7 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
         description: node.description,
         lane: node.lane,
         imageUrl: node.image_url,
+        style: node.style,
         width: node.size.width,
         height: node.size.height,
       },

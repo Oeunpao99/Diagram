@@ -15,7 +15,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   // Don't decide anything until the stored token has been checked, or a
   // refresh would flash the login screen at an already-signed-in user.
-  if (booting) return <div className="boot" role="status" aria-label="Loading" />;
+  if (booting) return <div className="min-h-screen bg-paper" role="status" aria-label="Loading" />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }

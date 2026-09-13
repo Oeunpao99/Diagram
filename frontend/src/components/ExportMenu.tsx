@@ -54,28 +54,32 @@ export function ExportMenu({ doc }: { doc: DiagramDoc }) {
 
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
-      <button className="btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <span className="btn__icon">
-          <Download />
-        </span>
+      <button
+        className="inline-flex items-center justify-center gap-[7px] rounded-[7px] border border-line bg-surface px-[11px] py-[7px] text-[12.5px] font-[520] text-ink transition-colors hover:border-line-strong hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px] [&_svg]:text-slate"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <Download />
         Export
       </button>
       {open && (
-        <div className="menu" role="menu">
-          <div className="menu__heading">Export diagram</div>
+        <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[210px] rounded-xl border border-line bg-surface p-[5px] shadow-3 animate-[menu-in_130ms_ease]" role="menu">
+          <div className="px-2.5 pb-[5px] pt-1.5 text-[10.5px] font-[650] uppercase tracking-[0.06em] text-slate-soft">
+            Export diagram
+          </div>
           {FORMATS.map((format) => {
             const Icon = format.icon;
             return (
               <button
                 key={format.id}
                 role="menuitem"
-                className="menu__item"
+                className="flex w-full items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-left text-[12.5px] text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px] [&_svg]:shrink-0 [&_svg]:text-slate"
                 onClick={() => void run(format.id)}
                 disabled={working !== null}
               >
                 <Icon />
                 <span>{format.label}</span>
-                <span style={{ marginLeft: "auto", color: "var(--slate-soft)", fontSize: 11 }}>
+                <span className="ml-auto text-[11px] text-slate-soft">
                   {working === format.id ? "Waiting…" : format.hint}
                 </span>
               </button>

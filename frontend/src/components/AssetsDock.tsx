@@ -1,82 +1,36 @@
 import { useRef, useState } from "react";
-import { useReactFlow } from "@xyflow/react";
-import type { ReactNode } from "react";
 
-import { makeNode, type NewNodeSpec } from "../api/adapter";
-import { useDiagram } from "../store/useDiagram";
-import type { NodeKind } from "../api/types";
-import {
-  BoxIcon,
-  CloudIcon,
-  DatabaseIcon,
-  ImageIcon,
-  ServerIcon,
-  TypeIcon,
-  Upload,
-  UserIcon,
-} from "./icons";
-
-const ASSETS: { kind: NodeKind; label: string; icon: () => ReactNode }[] = [
-  { kind: "actor", label: "User", icon: UserIcon },
-  { kind: "service", label: "Server", icon: ServerIcon },
-  { kind: "database", label: "Database", icon: DatabaseIcon },
-  { kind: "cloud", label: "Cloud", icon: CloudIcon },
-  { kind: "process", label: "Box", icon: BoxIcon },
-  { kind: "document", label: "Shape", icon: TypeIcon },
-];
+import { ASSET_LIBRARY } from "./assetLibrary";
+import { useCanvasAssets } from "../hooks/useCanvasAssets";
+import { ImageIcon, TypeIcon, Upload } from "./icons";
 
 export function AssetsDock() {
   const [open, setOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
-
-  const addNode = (spec: NewNodeSpec) => {
-    const doc = useDiagram.getState().doc;
-    useDiagram.getState().setDoc({
-      ...doc,
-      nodes: [...doc.nodes, makeNode(spec)],
-    });
-  };
-
-  const centerPoint = () =>
-    screenToFlowPosition({
-      x: (document.querySelector<HTMLElement>(".stage")?.offsetWidth ?? 800) / 2,
-      y: (document.querySelector<HTMLElement>(".stage")?.offsetHeight ?? 600) / 2,
-    });
-
-  const onImagePicked = (file: File | undefined) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      addNode({
-        id: `img_${Date.now().toString(36)}`,
-        label: file.name,
-        kind: "note",
-        position: centerPoint(),
-        imageUrl: String(reader.result),
-      });
-    };
-    reader.readAsDataURL(file);
-  };
+  const { addImage } = useCanvasAssets();
 
   return (
     <>
-      <div className="assets" role="toolbar" aria-label="Assets">
+      <div
+        className="absolute left-4 top-[62px] z-[8] flex flex-col gap-1 rounded-[11px] border border-line bg-surface p-[5px] shadow-2"
+        role="toolbar"
+        aria-label="Assets"
+      >
         <button
-          className="assets__item"
+          className="grid size-[30px] place-items-center rounded-lg border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-green-deep [&_svg]:size-[15px]"
           title="Upload image"
           onClick={() => fileRef.current?.click()}
         >
           <ImageIcon />
         </button>
-        <button className="assets__item" title="Add text" onClick={() => setOpen((v) => !v)}>
+        <button className="grid size-[30px] place-items-center rounded-lg border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-green-deep [&_svg]:size-[15px]" title="Add text" onClick={() => setOpen((v) => !v)}>
           <TypeIcon />
         </button>
-        <span className="assets__sep" />
-        {ASSETS.slice(0, 4).map((asset) => (
+        <span className="h-px w-full bg-line" />
+        {ASSET_LIBRARY.slice(0, 4).map((asset) => (
           <button
             key={asset.kind}
-            className="assets__item"
+            className="grid size-[30px] place-items-center rounded-lg border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-green-deep [&_svg]:size-[15px]"
             title={`Drag ${asset.label}`}
             draggable
             onDragStart={(event) => {
@@ -87,7 +41,7 @@ export function AssetsDock() {
             {asset.icon()}
           </button>
         ))}
-        <button className="assets__item" title="More assets" onClick={() => setOpen((v) => !v)}>
+        <button className="grid size-[30px] place-items-center rounded-lg border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-green-deep" title="More assets" onClick={() => setOpen((v) => !v)}>
           <span style={{ fontSize: 13, fontWeight: 700, lineHeight: 1 }}>+</span>
         </button>
       </div>
@@ -97,22 +51,31 @@ export function AssetsDock() {
         type="file"
         accept="image/*"
         hidden
-        onChange={(event) => onImagePicked(event.target.files?.[0])}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) addImage(file);
+          event.target.value = "";
+        }}
       />
 
       {open && (
-        <div className="assets__panel">
-          <h4>Assets</h4>
-          <p>Upload an image, or drag an icon onto the canvas to place it.</p>
-          <button className="assets__upload" onClick={() => fileRef.current?.click()}>
+        <div className="absolute left-[calc(100%+8px)] top-0 z-30 w-[224px] animate-[menu-in_130ms_ease] rounded-xl border border-line bg-surface p-3 shadow-3">
+          <h4 className="m-0 mb-0.5 text-[13px] text-ink">Assets</h4>
+          <p className="m-0 mb-[9px] text-[11.5px] leading-[1.45] text-slate">
+            Upload an image, or drag an icon onto the canvas to place it.
+          </p>
+          <button
+            className="flex w-full items-center justify-center gap-[7px] rounded-[9px] border-[1.5px] border-dashed border-line bg-surface-2 px-2 py-[9px] text-xs font-[550] text-slate transition-all hover:border-green hover:bg-green-soft hover:text-green-deep [&_svg]:size-3.5"
+            onClick={() => fileRef.current?.click()}
+          >
             <Upload />
             Upload image
           </button>
-          <div className="assets__grid">
-            {ASSETS.map((asset) => (
+          <div className="mt-2.5 grid grid-cols-4 gap-1">
+            {ASSET_LIBRARY.map((asset) => (
               <span
                 key={asset.kind}
-                className="assets__icon"
+                className="grid aspect-square cursor-grab place-items-center rounded-lg border border-line bg-surface text-[9.5px] text-slate transition-colors hover:border-green-line hover:bg-green-soft hover:text-green-deep [&_svg]:size-4"
                 title={`${asset.label} (drag me)`}
                 draggable
                 onDragStart={(event) => {

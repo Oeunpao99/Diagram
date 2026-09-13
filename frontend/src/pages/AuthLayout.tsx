@@ -15,23 +15,29 @@ export function AuthLayout({
   footer: ReactNode;
 }) {
   return (
-    <div className="auth">
-      <div className="auth__toggle">
+    <div className="relative grid min-h-screen place-items-center bg-paper px-4 py-8">
+      <div className="absolute right-5 top-5">
         <ThemeToggle />
       </div>
 
-      <div className="auth__card">
-        <div className="auth__brand">
-          <span className="auth__mark" aria-hidden="true" />
-          <span className="auth__wordmark">Diagram Copilot</span>
+      <div className="w-full max-w-[400px] rounded-2xl border border-line bg-surface p-8 shadow-2 max-[560px]:px-5 max-[560px]:py-6">
+        <div className="mb-6 flex items-center gap-2.5">
+          <span className="size-[26px] rounded-lg bg-[linear-gradient(135deg,var(--green),var(--green-deep))]" aria-hidden="true" />
+          <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink-strong">
+            Diagram Copilot
+          </span>
         </div>
 
-        <h1 className="auth__title">{title}</h1>
-        <p className="auth__subtitle">{subtitle}</p>
+        <h1 className="m-0 mb-1.5 text-[22px] font-semibold tracking-[-0.02em] text-ink-strong">
+          {title}
+        </h1>
+        <p className="m-0 mb-6 text-[13px] text-slate">{subtitle}</p>
 
         {children}
 
-        <p className="auth__footer">{footer}</p>
+        <p className="mt-5 text-center text-[13px] text-slate [&_a]:font-medium [&_a]:text-green [&_a]:no-underline [&_a:hover]:underline">
+          {footer}
+        </p>
       </div>
     </div>
   );

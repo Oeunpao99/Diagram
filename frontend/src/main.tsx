@@ -1,5 +1,5 @@
 import "@xyflow/react/dist/style.css";
-import "./styles/app.css";
+import "./styles/tailwind.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

@@ -6,7 +6,6 @@ import { SettingsModal } from "../components/SettingsModal";
 import { StatusBar } from "../components/StatusBar";
 import { TemplateRail } from "../components/TemplateRail";
 import { TopBar } from "../components/TopBar";
-import { UserChip } from "../components/UserChip";
 import { useDiagram } from "../store/useDiagram";
 
 /** The editor itself — what App used to render directly, now behind auth. */
@@ -16,13 +15,12 @@ export default function Studio() {
 
   return (
     <ReactFlowProvider>
-      <div className="app">
+      <div className="flex h-full flex-col overflow-hidden bg-surface">
         <TopBar />
-        <div className="app__body">
+        <div className="grid min-h-0 flex-1 grid-cols-[var(--rail)_minmax(0,1fr)_var(--panel)] max-[1240px]:grid-cols-[var(--rail)_minmax(0,1fr)] max-[900px]:grid-cols-[minmax(0,1fr)]">
           <TemplateRail />
-          <main className="stage" aria-label="Diagram canvas">
+          <main className="relative min-w-0 overflow-hidden bg-paper" aria-label="Diagram canvas">
             <Canvas />
-            <UserChip />
           </main>
           <Copilot />
         </div>
