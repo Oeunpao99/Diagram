@@ -1,0 +1,22 @@
+# Postgres only. The API and the web app run on your machine so you keep
+# hot reload. `docker compose up -d` is all you need before migrating.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: diagram-db
+    environment:
+      POSTGRES_USER: diagram
+      POSTGRES_PASSWORD: diagram
+      POSTGRES_DB: diagram
+    ports:
+      - "5432:5432"
+    volumes:
+      - diagram-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U diagram -d diagram"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  diagram-pgdata:

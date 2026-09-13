@@ -1,0 +1,57 @@
+# ----- dependencies & build output -----
+node_modules/
+dist/
+build/
+.vite/
+.eslintcache
+*.tsbuildinfo
+
+# ----- python / backend -----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.mypy/
+*.egg-info/
+uv.lock.bak
+
+# ----- environment & secrets -----
+.env
+.env.*
+!.env.example
+.envrc
+.envrc.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.der
+*.cer
+*.jks
+*.keystore
+id_rsa
+id_rsa.pub
+id_dsa
+id_ecdsa
+id_ed25519
+*.ovpn
+service-account*.json
+credentials*.json
+secrets*.json
+
+# ----- local databases / data dumps -----
+*.sqlite
+*.sqlite3
+*.db
+*.sql.gz
+*.dump
+
+# ----- logs & temp -----
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
