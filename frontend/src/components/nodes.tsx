@@ -396,7 +396,7 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
               one) simply renders no icon rather than breaking the node. */}
           {NodeIcon && (
             <span className="node__icon" aria-hidden="true">
-              <NodeIcon size={17} strokeWidth={1.7} color={iconAccent} />
+              <NodeIcon size={18} strokeWidth={1.7} color={iconAccent} />
             </span>
           )}
           <span className="node__label">{data.label}</span>

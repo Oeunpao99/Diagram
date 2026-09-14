@@ -92,7 +92,7 @@ class TestLayout:
         assert edge.source_handle is None
 
     def test_fit_to_box_keeps_flow_left_to_right(self):
-        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 800, 600)
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 900, 600)
         x = {n.id: n.position.x for n in doc.nodes}
         # Wrapping folds layers into rows, so ordering holds inside a row
         # (a→b→c share the first row) rather than across the whole canvas.

@@ -66,7 +66,7 @@ export function makeNode(spec: NewNodeSpec): DiagramNode {
     description: spec.description ?? null,
     lane: spec.lane ?? null,
     position: spec.position,
-    size: spec.size ?? (spec.imageUrl ? { width: 200, height: 140 } : { width: 170, height: 64 }),
+    size: spec.size ?? (spec.imageUrl ? { width: 200, height: 140 } : { width: 196, height: 70 }),
     style: spec.style ?? {},
     icon: null,
     image_url: spec.imageUrl ?? null,

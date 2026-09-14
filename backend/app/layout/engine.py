@@ -18,29 +18,32 @@ from collections import defaultdict, deque
 
 from app.schemas.diagram import DiagramDoc, Direction, Node, NodeKind, Position
 
-# Spacing, in px. Tuned for the default 180x64 node.
-LAYER_GAP = 110  # along the flow axis, between layers
-NODE_GAP = 46  # across the flow axis, between siblings
-LANE_PADDING = 40
+# Spacing, in px. Tuned for the default 196x70 node.
+LAYER_GAP = 130  # along the flow axis, between layers
+NODE_GAP = 54  # across the flow axis, between siblings
+LANE_PADDING = 44
 LANE_HEADER = 160  # room for the lane title strip
 
 DEFAULT_SIZES: dict[NodeKind, tuple[float, float]] = {
-    NodeKind.start: (140, 56),
-    NodeKind.end: (140, 56),
-    NodeKind.decision: (170, 100),
-    NodeKind.database: (170, 80),
-    NodeKind.actor: (130, 90),
-    NodeKind.note: (200, 80),
+    NodeKind.start: (150, 60),
+    NodeKind.end: (150, 60),
+    NodeKind.decision: (184, 108),
+    NodeKind.database: (184, 88),
+    NodeKind.actor: (140, 96),
+    NodeKind.note: (210, 88),
 }
 
 
 def _sizes(doc: DiagramDoc) -> None:
     """Give every node a sensible box before we measure anything."""
     for node in doc.nodes:
-        w, h = DEFAULT_SIZES.get(node.kind, (180, 64))
-        # Long labels need a wider box or the text overflows the shape.
+        w, h = DEFAULT_SIZES.get(node.kind, (196, 70))
+        # Long labels need a wider box or the text overflows the shape. The
+        # `in (0, 180)` / `(0, 64)` checks below are against the Size model's
+        # *schema* default (Position/Size never changed) — that's the "still
+        # unsized" sentinel, independent of what these boxes actually grow to.
         if node.size.width in (0, 180):
-            node.size.width = max(w, min(300, 22 + len(node.label) * 8.2))
+            node.size.width = max(w, min(320, 26 + len(node.label) * 8.6))
         if node.size.height in (0, 64):
             node.size.height = h
 
