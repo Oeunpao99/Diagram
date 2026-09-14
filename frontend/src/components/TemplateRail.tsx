@@ -611,7 +611,7 @@ function AssetsPane() {
         <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
           <Sparkles /> Generate an icon
         </p>
-        <div className="mt-2 flex gap-1.5">
+        <div className="mt-2 space-y-1.5">
           <input
             value={iconPrompt}
             onChange={(event) => setIconPrompt(event.target.value)}
@@ -622,15 +622,15 @@ function AssetsPane() {
               }
             }}
             placeholder="e.g. a padlock, a forklift…"
-            className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-[7px] text-[12.5px] text-ink outline-none placeholder:text-slate-soft focus-visible:border-green"
+            className="w-full rounded-md border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-slate-soft focus-visible:border-green"
           />
           <button
             type="button"
             onClick={() => void generateIcon()}
             disabled={!iconPrompt.trim() || iconBusy}
-            className="shrink-0 rounded-md border border-green bg-green px-2.5 text-[12px] font-semibold text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-green bg-green px-3 py-2 text-[12.5px] font-semibold text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {iconBusy ? <span className="icon-gen__spin" aria-hidden="true" /> : "Generate"}
+            {iconBusy ? <span className="icon-gen__spin" aria-hidden="true" /> : "Generate icon"}
           </button>
         </div>
 
