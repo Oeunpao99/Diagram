@@ -5,9 +5,6 @@ import { api } from "../api/client";
 import {
   emptyDoc,
   normalizeDoc,
-  type DiagramDoc,
-  type DiagramEdge,
-  type DiagramNode,
   type DiagramType,
   type Template,
 } from "../api/types";
@@ -78,215 +75,98 @@ function categoryLabel(category: string): string {
   return CATEGORY_LABEL[category] ?? category;
 }
 
-/* ------------------------------------------------------------ mini preview */
 
-function layering(
-  nodes: DiagramNode[],
-  edges: DiagramEdge[],
-): Map<string, number> {
-  const depth = new Map<string, number>();
-  for (const n of nodes) depth.set(n.id, 0);
-  for (let i = 0; i < nodes.length; i++) {
-    let changed = false;
-    for (const e of edges) {
-      const s = depth.get(e.source);
-      const t = depth.get(e.target) ?? 0;
-      if (s !== undefined && s + 1 > t) {
-        depth.set(e.target, s + 1);
-        changed = true;
-      }
-    }
-    if (!changed) break;
+/** A clean 20x20 mark per diagram type, drawn in the current tint ink. */
+function TypeGlyph({ type }: { type: DiagramType }) {
+  const s = {
+    viewBox: "0 0 24 24",
+    width: 20,
+    height: 20,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (type) {
+    case "swimlane":
+      return (
+        <svg {...s}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+          <path d="M9 6v12" opacity="0.45" />
+        </svg>
+      );
+    case "architecture":
+      return (
+        <svg {...s}>
+          <rect x="4" y="4.5" width="16" height="4.6" rx="1.4" />
+          <rect x="6" y="14.9" width="12" height="4.6" rx="1.4" />
+        </svg>
+      );
+    case "network":
+      return (
+        <svg {...s}>
+          <circle cx="7" cy="17" r="3.2" />
+          <circle cx="17" cy="7" r="3.2" />
+          <circle cx="17.7" cy="16.6" r="1.1" opacity="0.5" />
+          <path d="M9.2 15.3 14.8 8.7" />
+        </svg>
+      );
+    case "sequence":
+      return (
+        <svg {...s}>
+          <path d="M7 3.5v17M17 3.5v17" strokeDasharray="2 2.4" />
+          <path d="M7.6 8.2h6.8M11.6 10.7l2.8-2.5L11.6 5.7" />
+          <path d="M16.4 13.8H9.6M12.4 16.3l-2.8 2.5 2.8 2.5" />
+        </svg>
+      );
+    case "er":
+      return (
+        <svg {...s}>
+          <rect x="4" y="3.5" width="16" height="17" rx="2" />
+          <path d="M4 8.2h16" />
+          <path d="M7.4 8.2V5.4h2.4" />
+          <circle cx="8.2" cy="11.6" r="1" fill="currentColor" stroke="none" />
+          <path d="M10.8 11.6h7" />
+          <circle cx="8.2" cy="15.8" r="1" fill="currentColor" stroke="none" />
+          <path d="M10.8 15.8h7" />
+        </svg>
+      );
+    case "org_chart":
+      return (
+        <svg {...s}>
+          <rect x="8" y="3" width="8" height="4.8" rx="1.5" />
+          <rect x="3.5" y="16.2" width="7" height="4.8" rx="1.5" />
+          <rect x="13.5" y="16.2" width="7" height="4.8" rx="1.5" />
+          <path d="M12 7.8v2.2M12 10H7.3M12 10h4.7M7.3 10v6.2M16.7 10v6.2" />
+        </svg>
+      );
+    case "mind_map":
+      return (
+        <svg {...s}>
+          <circle cx="12" cy="12" r="3.6" />
+          <path d="M3 6.5h4.4M3 12h4.4M3 17.5h4.4M16.6 6.5H21M16.6 12H21M16.6 17.5H21" />
+        </svg>
+      );
+    case "data_flow":
+      return (
+        <svg {...s}>
+          <path d="M5.5 8c0-2.2 2.9-4 6.5-4s6.5 1.8 6.5 4-2.9 4-6.5 4-6.5-1.8-6.5-4Z" opacity="0.9" />
+          <path d="M5.5 8v7c0 2.2 2.9 4 6.5 4s6.5-1.8 6.5-4V8" />
+          <path d="M5.5 11.5c0 2.2 2.9 4 6.5 4s6.5-1.8 6.5-4" opacity="0.4" />
+          <path d="M12 21v-1.8M9.5 20l2.5 1.6 2.5-1.6" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...s}>
+          <rect x="3" y="7" width="6.5" height="10" rx="2" />
+          <path d="M12.5 12h5.2M15 9.5l2.7 2.5-2.7 2.5" />
+        </svg>
+      );
   }
-  return depth;
 }
-
-function MiniPreview({ data }: { data: DiagramDoc }) {
-  const nodes = data.nodes ?? [];
-  const edges = data.edges ?? [];
-  const W = 46;
-  const H = 38;
-  const m = 5;
-
-  if (nodes.length === 0) {
-    return (
-      <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-    >
-        <g stroke="currentColor" strokeOpacity="0.4" strokeWidth="1" strokeDasharray="2 2.5">
-          <line x1="10" y1="12" x2="36" y2="12" />
-          <line x1="10" y1="19" x2="31" y2="19" />
-          <line x1="10" y1="26" x2="34" y2="26" />
-        </g>
-      </svg>
-    );
-  }
-
-  const depth = layering(nodes, edges);
-  const columns = new Map<number, string[]>();
-  for (const n of nodes) {
-    const d = depth.get(n.id) ?? 0;
-    const list = columns.get(d) ?? [];
-    list.push(n.id);
-    columns.set(d, list);
-  }
-
-  const cols = Math.max(0, ...[...depth.values()]);
-  const maxN = Math.max(1, ...[...columns.values()].map((ids) => ids.length));
-  const f = maxN > 6 ? 0.62 : maxN > 4 ? 0.8 : 1;
-  const w = 9.4 * f;
-  const h = 6.6 * f;
-  const colStep = cols > 1 ? (W - m * 2 - w) / (cols - 1) : 0;
-
-  const geo = new Map<string, { x: number; y: number }>();
-  for (const [d, ids] of columns) {
-    const step = ids.length > 1 ? (H - m * 2 - h) / (ids.length - 1) : 0;
-    ids.forEach((id, i) => {
-      geo.set(id, { x: m + d * colStep, y: m + i * step });
-    });
-  }
-
-  return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid meet"
-      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
-    >
-      <g
-        stroke="currentColor"
-        strokeWidth="1.1"
-        strokeLinejoin="round"
-        opacity="0.55"
-        fill="none"
-      >
-        {edges.map((edge) => {
-          const a = geo.get(edge.source);
-          const b = geo.get(edge.target);
-          if (!a || !b) return null;
-          const ax = a.x + w;
-          const ay = a.y + h / 2;
-          const bx = b.x;
-          const by = b.y + h / 2;
-          const mx = (ax + bx) / 2;
-          const d =
-            Math.abs(ay - by) <= 2.5
-              ? `M ${ax} ${ay} H ${bx}`
-              : `M ${ax} ${ay} H ${mx} V ${by} H ${bx}`;
-          return (
-            <g key={edge.id}>
-              <path d={d} />
-              <path
-                d={`M ${bx - 3.4} ${by - 2.2} L ${bx - 0.6} ${by} L ${bx - 3.4} ${by + 2.2}`}
-                strokeWidth="1"
-                opacity="0.9"
-              />
-            </g>
-          );
-        })}
-      </g>
-      {nodes.map((n) => {
-        const p = geo.get(n.id);
-        if (!p) return null;
-        const cx = p.x + w / 2;
-        const cy = p.y + h / 2;
-        const stroke = { stroke: "currentColor", strokeWidth: 1.2 } as const;
-        const fill = { fill: "var(--surface)" } as const;
-        switch (n.kind) {
-          case "decision": {
-            const rx = w * 0.48;
-            const ry = h * 0.58;
-            return (
-              <polygon
-                key={n.id}
-                points={`${cx},${cy - ry} ${cx + rx},${cy} ${cx},${cy + ry} ${cx - rx},${cy}`}
-                {...stroke}
-                {...fill}
-              />
-            );
-          }
-          case "start":
-          case "end":
-          case "note":
-            return (
-              <rect
-                key={n.id}
-                x={p.x}
-                y={p.y}
-                width={w}
-                height={h}
-                rx={h / 2}
-                {...stroke}
-                {...fill}
-              />
-            );
-          case "database": {
-            const ry = h * 0.42;
-            return (
-              <g key={n.id}>
-                <path
-                  d={`M ${p.x} ${cy - ry} v ${h - ry * 2} a ${w / 2} ${ry} 0 0 0 ${w} 0 v ${-(h - ry * 2)} a ${w / 2} ${ry} 0 0 1 -${w} 0`}
-                  {...stroke}
-                  {...fill}
-                />
-                <path
-                  d={`M ${p.x} ${cy - ry} a ${w / 2} ${ry} 0 0 0 ${w} 0`}
-                  {...stroke}
-                  fill="none"
-                />
-              </g>
-            );
-          }
-          case "document":
-          case "data":
-          case "queue": {
-            const fold = Math.min(3, w * 0.3);
-            return (
-              <g key={n.id}>
-                <path
-                  d={`M ${p.x} ${p.y} h ${w - fold} l ${fold} ${fold} v ${h - fold} h -${w} z`}
-                  {...stroke}
-                  {...fill}
-                />
-                <path
-                  d={`M ${p.x + w - fold} ${p.y} v ${fold} h ${fold}`}
-                  {...stroke}
-                  fill="none"
-                  opacity="0.6"
-                />
-                <g stroke="currentColor" strokeWidth="0.9" opacity="0.55">
-                  <line x1={p.x + 1.5} y1={cy - 1} x2={p.x + w - 1.5} y2={cy - 1} />
-                  <line x1={p.x + 1.5} y1={cy + 1} x2={p.x + w - 1.5} y2={cy + 1} />
-                </g>
-              </g>
-            );
-          }
-          case "actor":
-            return (
-              <g key={n.id}>
-                <circle cx={cx} cy={p.y + 2.1} r={1.6} {...stroke} {...fill} />
-                <path
-                  d={`M ${p.x + 1} ${p.y + h - 1} a ${w / 2 - 1} ${h * 0.42} 0 0 1 ${w - 2} 0`}
-                  {...stroke}
-                  fill="none"
-                />
-              </g>
-            );
-          case "cloud":
-            return (
-              <ellipse key={n.id} cx={cx} cy={cy} rx={w * 0.5} ry={h * 0.72} {...stroke} {...fill} />
-            );
-          default:
-            return (
-              <rect key={n.id} x={p.x} y={p.y} width={w} height={h} rx={1.8} {...stroke} {...fill} />
-            );
-        }
-      })}
-    </svg>
-  );
-}
-
 /* -------------------------------------------------------------- templates */
 
 function TemplatesPane() {
@@ -449,10 +329,10 @@ function TemplatesPane() {
                         }
                       >
                         <span
-                          className="relative h-[38px] w-[46px] shrink-0 overflow-hidden rounded-[7px] border border-[var(--tint-line)] bg-[var(--tint)] text-[var(--tint-ink)]"
+                          className="grid h-[38px] w-[46px] shrink-0 place-items-center overflow-hidden rounded-[7px] border border-[var(--tint-line)] bg-[var(--tint)] text-[var(--tint-ink)]"
                           aria-hidden="true"
                         >
-                          <MiniPreview data={template.data} />
+                          <TypeGlyph type={template.diagram_type} />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center gap-1.5">
