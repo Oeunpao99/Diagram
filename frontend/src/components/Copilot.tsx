@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { usePanelResize } from "../hooks/usePanelResize";
 import { useDiagram } from "../store/useDiagram";
 import { Alert, ArrowRight, Check, Send, Sparkles } from "./icons";
 
@@ -45,6 +46,7 @@ export function Copilot() {
   const [showImproved, setShowImproved] = useState(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+  const resize = usePanelResize();
 
   const busy = useDiagram((s) => s.busy);
   const improved = useDiagram((s) => s.improved);
@@ -126,7 +128,18 @@ export function Copilot() {
   const suggestions = hasNodes ? EDIT_SUGGESTIONS : STARTER_IDEAS;
 
   return (
-    <aside className="flex min-h-0 flex-col border-l border-line bg-surface max-[1240px]:hidden" data-copilot>
+    <aside
+      className="relative flex min-h-0 flex-col border-l border-line bg-surface max-[1240px]:hidden"
+      data-copilot
+    >
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- drag-to-resize, not a click target */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize AI Copilot panel"
+        className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize touch-none select-none hover:bg-green-ring active:bg-green-ring"
+        onPointerDown={resize.onPointerDown}
+      />
       <header className="shrink-0 border-b border-line px-3.5 pb-3 pt-3.5">
         <h1 className="m-0 flex items-center gap-2 text-[14.5px] font-[650] tracking-[-0.01em] [&_svg]:size-[17px] [&_svg]:text-green">
           <Sparkles />

@@ -110,7 +110,11 @@ function MiniPreview({ data }: { data: DiagramDoc }) {
 
   if (nodes.length === 0) {
     return (
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+      <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+    >
         <g stroke="currentColor" strokeOpacity="0.4" strokeWidth="1" strokeDasharray="2 2.5">
           <line x1="10" y1="12" x2="36" y2="12" />
           <line x1="10" y1="19" x2="31" y2="19" />
@@ -145,7 +149,11 @@ function MiniPreview({ data }: { data: DiagramDoc }) {
   }
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+    >
       <g
         stroke="currentColor"
         strokeWidth="1.1"
@@ -441,7 +449,7 @@ function TemplatesPane() {
                         }
                       >
                         <span
-                          className="h-[38px] w-[46px] shrink-0 overflow-hidden rounded-[7px] border border-[var(--tint-line)] bg-[var(--tint)] text-[var(--tint-ink)] [&_svg]:absolute [&_svg]:inset-0 [&_svg]:h-full [&_svg]:w-full"
+                          className="relative h-[38px] w-[46px] shrink-0 overflow-hidden rounded-[7px] border border-[var(--tint-line)] bg-[var(--tint)] text-[var(--tint-ink)]"
                           aria-hidden="true"
                         >
                           <MiniPreview data={template.data} />

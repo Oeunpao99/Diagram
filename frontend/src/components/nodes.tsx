@@ -1,7 +1,9 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { useEffect, useRef, useState } from "react";
 
 import type { FlowNode } from "../api/adapter";
 import type { NodeKind } from "../api/types";
+import { useDiagram } from "../store/useDiagram";
 
 /** Shape family per node kind. Everything else is CSS. */
 const SHAPE: Record<NodeKind, string> = {
@@ -78,24 +80,78 @@ function ResizeCorners() {
   );
 }
 
-export function DiagramNode({ data, selected }: NodeProps<FlowNode>) {
+/** Renames a node in place — used both by double-click-to-edit and, for
+ *  brand-new text/shape drops, to jump straight into editing. */
+function commitLabel(id: string, label: string) {
+  const trimmed = label.trim();
+  if (!trimmed) return; // an empty label reads as "still loading"; keep the old one
+  const current = useDiagram.getState().doc;
+  useDiagram.getState().setDoc(
+    {
+      ...current,
+      nodes: current.nodes.map((n) => (n.id === id ? { ...n, label: trimmed } : n)),
+    },
+    { silent: true },
+  );
+}
+
+export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   const shape = SHAPE[data.kind] ?? "box";
   const color = nodeColor(data);
   const textOnly = data.style?.textOnly === true;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(data.label);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(data.label);
+      // Autofocus needs a tick — the input has only just mounted.
+      requestAnimationFrame(() => inputRef.current?.select());
+    }
+  }, [editing, data.label]);
+
+  const finishEditing = (commit: boolean) => {
+    if (commit) commitLabel(id, draft);
+    setEditing(false);
+  };
+
   return (
     <div
-      className={`node node--${shape} node--kind-${data.kind} ${textOnly ? "node--text-only" : ""} ${selected ? "is-selected" : ""}`}
+      className={`node node--${shape} node--kind-${data.kind} ${textOnly ? "node--text-only" : ""} ${selected ? "is-selected" : ""} ${data.justAdded ? "node--just-added" : ""}`}
       style={{
         width: data.width,
         height: data.height,
         ...(color && { background: color.bg, borderColor: color.line, color: color.ink }),
       }}
       title={data.description ?? undefined}
+      onDoubleClick={(event) => {
+        if (data.imageUrl) return; // nothing to rename — the label isn't shown
+        event.stopPropagation();
+        setEditing(true);
+      }}
     >
       <Handle type="target" position={Position.Left} className="node__port" />
       <Handle type="target" position={Position.Top} className="node__port" id="t" />
       {data.imageUrl ? (
         <img className="node__image" src={data.imageUrl} alt="" draggable={false} />
+      ) : editing ? (
+        <input
+          ref={inputRef}
+          className="node__label-input nodrag"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={() => finishEditing(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              finishEditing(true);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              finishEditing(false);
+            }
+          }}
+        />
       ) : (
         <span className="node__label">{data.label}</span>
       )}

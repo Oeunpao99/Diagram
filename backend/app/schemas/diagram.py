@@ -34,6 +34,7 @@ class NodeKind(str, Enum):
 class EdgeStyle(str, Enum):
     solid = "solid"
     dashed = "dashed"
+    dotted = "dotted"
     animated = "animated"
 
 
@@ -90,6 +91,12 @@ class Edge(BaseModel):
     style: EdgeStyle = EdgeStyle.solid
     condition: str | None = Field(default=None, description="e.g. 'approved' / 'rejected'")
     bidirectional: bool = False
+    curve: str | None = Field(
+        default=None,
+        description="Connector shape: 'smoothstep' | 'step' | 'straight' | 'bezier'",
+    )
+    color: str | None = Field(default=None, description="Stroke colour, a hex string")
+    width: float | None = Field(default=None, description="Stroke width in pixels")
 
 
 class Lane(BaseModel):

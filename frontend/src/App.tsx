@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Settings from "./pages/Settings";
 import Studio from "./pages/Studio";
+import { restorePanelWidth } from "./hooks/usePanelResize";
 import { useAuth } from "./store/useAuth";
 import { applyTheme, watchSystemTheme } from "./theme";
 
@@ -27,6 +28,7 @@ export default function App() {
     // Paint the cached preference immediately; boot() corrects it from the
     // account once /auth/me answers.
     applyTheme(useAuth.getState().theme, useAuth.getState().accent);
+    restorePanelWidth();
     void boot();
     return watchSystemTheme(
       () => useAuth.getState().theme,

@@ -119,7 +119,10 @@ export const api = {
     doc: DiagramDoc,
     instruction: string,
     selection: string[] = [],
-    relayout = true,
+    // The model reads the instruction itself and decides — see
+    // "needs_relayout" in the backend's edit prompt. Forcing true here would
+    // override that on every edit and reflow the whole canvas for a rename.
+    relayout = false,
     diagramId?: string | null,
   ) => post<EditResult>("/ai/edit", { doc, instruction, selection, relayout, diagram_id: diagramId }),
 

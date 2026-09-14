@@ -49,6 +49,7 @@ export function CanvasToolbar({
   const autoLayout = useDiagram((s) => s.autoLayout);
   const empty = useDiagram((s) => s.doc.nodes.length === 0);
   const busy = useDiagram((s) => s.busy);
+  const selectionCount = useDiagram((s) => s.selection.length);
 
   return (
     <div
@@ -61,8 +62,9 @@ export function CanvasToolbar({
           key={item.id}
           className={`group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5 ${tool === item.id ? "bg-green-soft text-green-deep" : ""}`}
           onClick={() => onTool(item.id)}
-          title={item.label}
+          title={item.id === "group" && selectionCount < 2 ? "Select 2+ nodes to group" : item.label}
           aria-pressed={tool === item.id}
+          disabled={item.id === "group" && selectionCount < 2}
         >
           {item.icon()}
           <span className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-20 -translate-x-1/2 -translate-y-0.5 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-on-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">

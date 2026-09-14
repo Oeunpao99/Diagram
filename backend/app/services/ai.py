@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import select
@@ -25,6 +26,7 @@ from app.schemas.diagram import (
     DocumentationResponse,
     EditResponse,
     ImprovePromptResponse,
+    Position,
     ValidationReport,
 )
 from app.services import prompts
@@ -180,6 +182,71 @@ def _algorithm_for(doc: DiagramDoc) -> str:
     return "layered"
 
 
+# Where a new node lands relative to whatever it connects to, per direction —
+# one step forward along the flow's own axis.
+_FORWARD_STEP: dict[Direction, tuple[float, float]] = {
+    Direction.LR: (240.0, 0.0),
+    Direction.RL: (-240.0, 0.0),
+    Direction.TB: (0.0, 150.0),
+    Direction.BT: (0.0, -150.0),
+}
+_SIBLING_GAP = 120.0
+
+
+def _place_new_nodes(doc: DiagramDoc, new_ids: set[str]) -> None:
+    """Position nodes an edit introduced, without moving anything that was
+    already on the canvas. Used instead of a full relayout so "add one more
+    step" doesn't also reshuffle every node that already had a place — see
+    the needs_relayout note in prompts.py for when a full layout runs instead.
+    """
+    if not new_ids:
+        return
+    dx, dy = _FORWARD_STEP.get(doc.direction, _FORWARD_STEP[Direction.LR])
+    by_id = {n.id: n for n in doc.nodes}
+    settled = {n.id for n in doc.nodes if n.id not in new_ids}
+    anchored_count: dict[str, int] = defaultdict(int)
+    pending = [by_id[nid] for nid in new_ids if nid in by_id]
+
+    # A short chain of new nodes (A -> B -> C, all new) can anchor off each
+    # other one link at a time, without ever touching an existing node.
+    for _ in range(len(pending) or 1):
+        remaining = []
+        for node in pending:
+            neighbor_id = next(
+                (
+                    (edge.target if edge.source == node.id else edge.source)
+                    for edge in doc.edges
+                    if node.id in (edge.source, edge.target)
+                    and (edge.target if edge.source == node.id else edge.source) in settled
+                ),
+                None,
+            )
+            if neighbor_id is None:
+                remaining.append(node)
+                continue
+            anchor = by_id[neighbor_id]
+            slot = anchored_count[neighbor_id]
+            anchored_count[neighbor_id] += 1
+            node.position = Position(
+                x=anchor.position.x + dx + (slot * _SIBLING_GAP if dx == 0 else 0),
+                y=anchor.position.y + dy + (slot * _SIBLING_GAP if dy == 0 else 0),
+            )
+            settled.add(node.id)
+        pending = remaining
+        if not pending:
+            break
+
+    if pending:
+        # Nothing positioned to anchor to — an isolated node, or new nodes
+        # only connected to each other in a cycle. Cascade off the existing
+        # diagram's far edge so they land clear of everything else.
+        others = [n for n in doc.nodes if n.id not in new_ids]
+        base_x = max((n.position.x for n in others), default=0.0)
+        base_y = max((n.position.y for n in others), default=0.0)
+        for i, node in enumerate(pending):
+            node.position = Position(x=base_x + dx, y=base_y + dy + i * _SIBLING_GAP)
+
+
 def _coerce_doc(data: dict[str, Any], fallback_direction: Direction) -> DiagramDoc:
     """Models occasionally return near-miss JSON. Nudge it into the schema."""
     data = dict(data)
@@ -290,8 +357,14 @@ async def edit_diagram(
             node.position, node.size = manual[node.id]
 
     new_nodes = [n for n in updated.nodes if n.id not in manual]
-    if relayout or len(new_nodes) > 2:
+    # `relayout` is a client override (nothing currently sends true); the
+    # model's own "needs_relayout" read of the instruction is what normally
+    # decides. Either way, more than a couple of new nodes reshapes the flow
+    # enough that a full layout beats guessing at placement one at a time.
+    if relayout or bool(payload.get("needs_relayout")) or len(new_nodes) > 2:
         apply_layout(updated, updated.direction, _algorithm_for(updated))
+    elif new_nodes:
+        _place_new_nodes(updated, {n.id for n in new_nodes})
 
     report = validate(updated)
     changes = list(payload.get("changes", [])) + repair_notes

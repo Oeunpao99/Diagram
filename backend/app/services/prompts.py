@@ -19,7 +19,8 @@ Return a single JSON object with this shape:
       "label": "Receive shipping documents",
       "kind": "start | end | process | decision | document | data | database | actor | system | service | queue | cloud | note",
       "description": "optional detail shown on hover",
-      "lane": "lane_customs"
+      "lane": "lane_customs",
+      "style": {"color": "emerald"}
     }
   ],
   "edges": [
@@ -36,6 +37,10 @@ Rules:
 - The flow needs exactly one clear entry point and at least one exit.
 - Labels are verb-first and under six words where possible.
 - Only use "lanes" when the diagram type is swimlane, or when the user named actors/departments.
+- A node's `style.color` is optional and purely cosmetic — omit it to leave the
+  node its default look. Only set it when the user asks to colour, highlight,
+  or recolour something. Accepted values: teal, emerald, blue, indigo, violet,
+  fuchsia, rose, orange, amber, slate, or a raw "#rrggbb" hex string.
 - Output JSON only. No prose, no markdown fences.
 """
 
@@ -81,8 +86,19 @@ Return a single JSON object:
 
 {{
   "doc": {{ ...the complete updated diagram, same schema as below... }},
-  "changes": ["Added rejection path from Document verification to Notify agent", "..."]
+  "changes": ["Added rejection path from Document verification to Notify agent", "..."],
+  "needs_relayout": false
 }}
+
+Set "needs_relayout" to true only when the existing layout should be thrown
+out and recomputed from scratch — the user explicitly asked to rearrange,
+clean up, reflow, or fix crossing connectors, or the edit reshaped the flow
+enough that the old positions no longer make sense (a new branch spliced into
+the middle, several nodes removed, direction changed). Leave it false for
+everything else — renaming, recoloring, adding one or two nodes that can slot
+in near what they connect to, deleting a leaf node. false is the common case;
+when in doubt, false, since a full relayout also discards every position the
+user placed by hand.
 
 The diagram inside "doc" follows this schema:
 {SCHEMA_BLOCK}"""

@@ -1,6 +1,6 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 
-import type { DiagramDoc, DiagramNode, NodeKind } from "./types";
+import type { DiagramDoc, DiagramNode, EdgeCurve, EdgeStyle, NodeKind } from "./types";
 
 export interface NewNodeSpec {
   id: string;
@@ -40,6 +40,9 @@ export interface FlowNodeData extends Record<string, unknown> {
   style?: DiagramNode["style"];
   width: number;
   height: number;
+  /** Set for exactly one sync — the one where an edit introduced this node —
+   *  so it can get a brief "just landed" highlight. Never persisted. */
+  justAdded?: boolean;
 }
 
 export type FlowNode = Node<FlowNodeData, "diagram" | "lane">;
@@ -98,21 +101,42 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
     });
   }
 
-  const edges: Edge[] = doc.edges.map((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label ?? edge.condition ?? undefined,
-    type: "smoothstep",
-    animated: edge.style === "animated",
-    markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 },
-    markerStart: edge.bidirectional
-      ? { type: MarkerType.ArrowClosed, width: 16, height: 16 }
-      : undefined,
-    style: edge.style === "dashed" ? { strokeDasharray: "5 4" } : undefined,
-    labelBgPadding: [6, 3] as [number, number],
-    labelBgBorderRadius: 3,
-  }));
+  const edges: Edge[] = doc.edges.map((edge) => {
+    // Line pattern dash arrays. "animated" rides React Flow's own animated
+    // dash; the rest get an explicit strokeDasharray.
+    const dash: Record<EdgeStyle, string | undefined> = {
+      solid: undefined,
+      dashed: "5 4",
+      dotted: "1.5 5",
+      animated: undefined,
+    };
+    const stroke = edge.color ?? undefined;
+    const strokeWidth = edge.width ?? undefined;
+    const type: Record<EdgeCurve, string> = {
+      smoothstep: "smoothstep",
+      step: "step",
+      straight: "straight",
+      bezier: "default",
+    };
+    const marker = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke };
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.label ?? edge.condition ?? undefined,
+      type: edge.curve ? type[edge.curve] : "smoothstep",
+      animated: edge.style === "animated",
+      markerEnd: marker,
+      markerStart: edge.bidirectional ? marker : undefined,
+      style: {
+        ...(dash[edge.style] ? { strokeDasharray: dash[edge.style] } : {}),
+        ...(stroke ? { stroke } : {}),
+        ...(strokeWidth ? { strokeWidth } : {}),
+      },
+      labelBgPadding: [6, 3] as [number, number],
+      labelBgBorderRadius: 3,
+    };
+  });
 
   return { nodes, edges };
 }
@@ -152,6 +176,15 @@ export function fromFlow(doc: DiagramDoc, nodes: FlowNode[], edges: Edge[]): Dia
       .filter((e) => live.has(e.source) && live.has(e.target))
       .map((e) => {
         const original = doc.edges.find((d) => d.id === e.id);
+        // Reverse the React Flow -> doc curve mapping ("default" is bezier.
+        // React Flow only emits a `type` we set, so a plain default empty
+        // edge that was never styled simply stays null.)
+        const curve =
+          e.type === "default"
+            ? ("bezier" as const)
+            : e.type === "smoothstep" || e.type === "step" || e.type === "straight"
+              ? (e.type as EdgeCurve)
+              : (original?.curve ?? null);
         return {
           id: e.id,
           source: e.source,
@@ -160,6 +193,10 @@ export function fromFlow(doc: DiagramDoc, nodes: FlowNode[], edges: Edge[]): Dia
           style: original?.style ?? (e.animated ? "animated" : "solid"),
           condition: original?.condition ?? null,
           bidirectional: original?.bidirectional ?? false,
+          curve,
+          color: typeof e.style?.stroke === "string" ? e.style.stroke : (original?.color ?? null),
+          width:
+            typeof e.style?.strokeWidth === "number" ? e.style.strokeWidth : (original?.width ?? null),
         };
       }),
   };

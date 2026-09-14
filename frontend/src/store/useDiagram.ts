@@ -18,6 +18,7 @@ interface DiagramState {
   improved: ImprovedPrompt | null;
   changeLog: string[];
   selection: string[];
+  edgeSelection: string[];
   busy: Busy;
   error: string | null;
 
@@ -26,6 +27,7 @@ interface DiagramState {
 
   setDoc: (doc: DiagramDoc, options?: { silent?: boolean }) => void;
   setSelection: (ids: string[]) => void;
+  setEdgeSelection: (ids: string[]) => void;
   undo: () => void;
   redo: () => void;
   clearError: () => void;
@@ -51,6 +53,7 @@ export const useDiagram = create<DiagramState>((set, get) => ({
   improved: null,
   changeLog: [],
   selection: [],
+  edgeSelection: [],
   busy: null,
   error: null,
   past: [],
@@ -68,6 +71,7 @@ export const useDiagram = create<DiagramState>((set, get) => ({
     ),
 
   setSelection: (selection) => set({ selection }),
+  setEdgeSelection: (edgeSelection) => set({ edgeSelection }),
 
   undo: () =>
     set((state) => {

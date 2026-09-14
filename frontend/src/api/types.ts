@@ -15,7 +15,10 @@ export type NodeKind =
   | "cloud"
   | "note";
 
-export type EdgeStyle = "solid" | "dashed" | "animated";
+export type EdgeStyle = "solid" | "dashed" | "dotted" | "animated";
+
+/** Connector routing used by React Flow when drawing a link line. */
+export type EdgeCurve = "smoothstep" | "step" | "bezier" | "straight";
 export type Direction = "LR" | "RL" | "TB" | "BT";
 
 export type DiagramType =
@@ -51,6 +54,12 @@ export interface DiagramEdge {
   style: EdgeStyle;
   condition?: string | null;
   bidirectional?: boolean;
+  /** Connector shape; undefined keeps the default smoothstep routing. */
+  curve?: EdgeCurve | null;
+  /** Stroke colour, a hex string; undefined/null keeps the theme default. */
+  color?: string | null;
+  /** Stroke width in pixels; undefined/null keeps the 1.5 default. */
+  width?: number | null;
 }
 
 export interface Lane {
@@ -150,6 +159,9 @@ export function normalizeDoc(raw: Partial<DiagramDoc>): DiagramDoc {
       style: edge.style ?? "solid",
       condition: edge.condition ?? null,
       bidirectional: edge.bidirectional ?? false,
+      curve: edge.curve ?? null,
+      color: edge.color ?? null,
+      width: edge.width ?? null,
     })),
     nodes: (raw.nodes ?? []).map((node) => ({
       ...node,

@@ -342,6 +342,15 @@
   }
 }
 
+@keyframes rehearse-fill {
+  from {
+    fill-opacity: 0;
+  }
+  to {
+    fill-opacity: 0.22;
+  }
+}
+
 @keyframes btn-spin {
   to {
     transform: rotate(360deg);
@@ -367,6 +376,19 @@
   inset: 0;
   z-index: 5;
   pointer-events: none;
+}
+
+/* Real nodes/edges fade out for the rehearsal and back in once it's done —
+   see the data-rehearsing comment in Canvas.tsx for why. */
+.react-flow__nodes,
+.react-flow__edges {
+  transition: opacity 320ms ease;
+}
+
+[data-rehearsing="true"] .react-flow__nodes,
+[data-rehearsing="true"] .react-flow__edges {
+  opacity: 0;
+  transition: none;
 }
 
 .rehearse svg {
@@ -572,6 +594,21 @@
   overflow-wrap: anywhere;
 }
 
+.node__label-input {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: text;
+}
+
 .node__image {
   position: relative;
   max-width: 100%;
@@ -637,6 +674,62 @@
   font-weight: 500;
   justify-content: flex-start;
   padding: 2px 4px;
+}
+
+/* A node an edit just introduced — everything else on the canvas stays put,
+   this is the only thing that draws the eye to what actually changed. */
+.node--just-added {
+  animation: node-just-added 900ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes node-just-added {
+  0% {
+    box-shadow: 0 0 0 0 var(--green-ring);
+    transform: scale(0.85);
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  60% {
+    box-shadow: 0 0 0 6px var(--green-ring);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    transform: scale(1);
+  }
+}
+
+/* Floating status while an edit is in flight — the canvas itself doesn't
+   change until the edit lands, this is the only feedback in the meantime. */
+.canvas-toast {
+  position: absolute;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.canvas-toast__spin {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border: 2px solid var(--green-line);
+  border-right-color: var(--green);
+  border-radius: 50%;
+  animation: btn-spin 700ms linear infinite;
 }
 
 .node--kind-decision {
