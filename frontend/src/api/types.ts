@@ -195,3 +195,31 @@ export interface TokenResponse {
   token_type: string;
   user: User;
 }
+
+/* --- saved diagrams ------------------------------------------------------- */
+
+/** The compact row the /diagrams list returns — enough for a picker. */
+export interface DiagramListItem {
+  id: string;
+  title: string;
+  diagram_type: string;
+  is_favorite: boolean;
+  updated_at: string;
+}
+
+/** Full record from GET/POST/PATCH /diagrams. `data` is the stored doc. */
+export interface DiagramOut {
+  id: string;
+  project_id: string | null;
+  title: string;
+  diagram_type: string;
+  direction: string;
+  source_prompt: string | null;
+  improved_prompt: string | null;
+  tags: string[];
+  is_favorite: boolean;
+  current_version: number;
+  created_at: string;
+  updated_at: string;
+  data: Partial<DiagramDoc>;
+}

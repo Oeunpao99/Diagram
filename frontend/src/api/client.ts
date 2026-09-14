@@ -1,6 +1,8 @@
 import type {
   Accent,
   DiagramDoc,
+  DiagramListItem,
+  DiagramOut,
   DiagramType,
   Direction,
   EditResult,
@@ -103,9 +105,25 @@ async function get<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function del(path: string): Promise<void> {
+  const response = await fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    headers: headers(false),
+  });
+  if (!response.ok) {
+    await guard(response);
+    throw new ApiError(response.statusText, response.status);
+  }
+}
+
 export const api = {
   improvePrompt: (prompt: string, diagram_type?: DiagramType) =>
     post<ImprovedPrompt>("/ai/improve-prompt", { prompt, diagram_type }),
+
+  analyzeImage: (imageDataUrl: string, prompt = "") =>
+    post<ImprovedPrompt>("/ai/analyze-image", { image_data_url: imageDataUrl, prompt }),
+
+  generateIcon: (prompt: string) => post<{ svg: string }>("/ai/generate-icon", { prompt }),
 
   generate: (payload: {
     prompt: string;
@@ -138,15 +156,23 @@ export const api = {
 
   templates: () => get<Template[]>("/templates"),
 
-  saveDiagram: (id: string, doc: DiagramDoc, versionLabel?: string) =>
-    post<unknown>(
+  // `keepVersion` is off for autosaves — every node drag shouldn't mint a
+  // DiagramVersion snapshot. Doing so just overwrites data in place.
+  saveDiagram: (id: string, doc: DiagramDoc, versionLabel?: string, keepVersion = false) =>
+    post<DiagramOut>(
       `/diagrams/${id}`,
-      { doc, title: doc.title, version_label: versionLabel },
+      { doc, title: doc.title, keep_version: keepVersion, version_label: versionLabel },
       "PATCH",
     ),
 
   createDiagram: (doc: DiagramDoc) =>
-    post<{ id: string }>("/diagrams", { title: doc.title, doc }),
+    post<DiagramOut>("/diagrams", { title: doc.title, doc }),
+
+  listDiagrams: (limit = 40) => get<DiagramListItem[]>(`/diagrams?limit=${limit}`),
+
+  getDiagram: (id: string) => get<DiagramOut>(`/diagrams/${id}`),
+
+  deleteDiagram: (id: string) => del(`/diagrams/${id}`),
 
   /* --- auth --- */
 

@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import {
   emptyDoc,
   normalizeDoc,
+  type DiagramListItem,
   type DiagramType,
   type Template,
 } from "../api/types";
@@ -20,6 +21,7 @@ import {
   Layers,
   Plus,
   Search,
+  Trash,
   Upload,
 } from "./icons";
 import { UserChip } from "./UserChip";
@@ -73,6 +75,21 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 function categoryLabel(category: string): string {
   return CATEGORY_LABEL[category] ?? category;
+}
+
+/** Compact "x min ago"-style age for the saved-diagrams list. */
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const seconds = Math.round((Date.now() - then) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 
@@ -176,11 +193,17 @@ function TemplatesPane() {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
 
+  const [diagrams, setDiagrams] = useState<DiagramListItem[]>([]);
+  const [diagramsOpen, setDiagramsOpen] = useState(true);
+  const [diagramsFailed, setDiagramsFailed] = useState(false);
+
   const setDoc = useDiagram((s) => s.setDoc);
   const autoLayout = useDiagram((s) => s.autoLayout);
   const busy = useDiagram((s) => s.busy);
   const docTitle = useDiagram((s) => s.doc.title);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
+  const diagramId = useDiagram((s) => s.diagramId);
+  const savedRev = useDiagram((s) => s.savedRev);
 
   useEffect(() => {
     api
@@ -188,6 +211,26 @@ function TemplatesPane() {
       .then(setTemplates)
       .catch(() => setFailed(true));
   }, []);
+
+  // Re-fetch the saved list whenever the store says a diagram was created,
+  // saved, opened or removed (savedRev bumps), so ordering stacks stay current.
+  useEffect(() => {
+    let alive = true;
+    api
+      .listDiagrams(40)
+      .then((items) => {
+        if (alive) {
+          setDiagrams(items);
+          setDiagramsFailed(false);
+        }
+      })
+      .catch(() => {
+        if (alive) setDiagramsFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [savedRev]);
 
   const needle = query.trim().toLowerCase();
   const filtered = useMemo(() => {
@@ -221,11 +264,32 @@ function TemplatesPane() {
     });
 
   const use = async (template: Template) => {
+    useDiagram.getState().beginNew();
     setDoc(normalizeDoc(template.data));
     await autoLayout(template.data.direction);
   };
 
-  const startBlank = () => setDoc(emptyDoc());
+  const startBlank = () => {
+    // A blank canvas belongs to no saved diagram: the first real edit will
+    // autosave as a brand-new record instead of overwriting the open one.
+    useDiagram.getState().beginNew();
+    setDoc(emptyDoc());
+  };
+
+  const openSaved = (id: string) => void useDiagram.getState().loadDiagram(id);
+
+  const removeSaved = async (id: string) => {
+    try {
+      await api.deleteDiagram(id);
+      const state = useDiagram.getState();
+      // Dropping the diagram that's on screen detaches it too, so the next
+      // edit starts fresh rather than recreating the row just deleted.
+      if (state.diagramId === id) state.beginNew();
+      else state.bumpSaved();
+    } catch {
+      // A failed delete just leaves the row alone.
+    }
+  };
 
   const creating = busy === "laying-out";
   const empty = !failed && templates.length === 0;
@@ -266,6 +330,75 @@ function TemplatesPane() {
           </span>
         )}
       </button>
+
+      {diagrams.length > 0 && (
+        <section className="border-b border-line pb-[9px]" aria-label="My diagrams">
+          <button
+            className="group flex w-full items-center justify-between gap-2 border-none bg-transparent p-1 px-0.5 text-left"
+            onClick={() => setDiagramsOpen((v) => !v)}
+            aria-expanded={diagramsOpen}
+          >
+            <span className="flex items-center gap-1.5 text-[11.5px] font-[650] text-slate transition-colors group-hover:text-ink">
+              My diagrams
+              <span className="rounded-[10px] bg-paper px-[6px] text-[10px] font-[550] text-slate-soft">{diagrams.length}</span>
+            </span>
+            <span className={`text-slate-soft transition-transform duration-200 [&_svg]:size-3.5 ${diagramsOpen ? "" : "-rotate-90"}`}>
+              <ChevronDown />
+            </span>
+          </button>
+          {diagramsOpen && (
+            <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
+              {diagrams.map((item) => {
+                const type = item.diagram_type as DiagramType;
+                const active = item.id === diagramId;
+                return (
+                  <li key={item.id} className="group flex items-stretch gap-1">
+                    <button
+                      className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-[9px] border p-[7px] text-left transition-[background,border-color,box-shadow] hover:border-line hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none ${active ? "border-green-line bg-green-soft shadow-[0_0_0_3px_var(--green-ring)] hover:bg-green-soft" : "border-transparent"}`}
+                      onClick={() => openSaved(item.id)}
+                      aria-current={active ? "true" : undefined}
+                      title={`Open “${item.title}”`}
+                      style={
+                        (() => {
+                          const [bg, line, ink] = tintFor(type);
+                          return { "--tint": bg, "--tint-line": line, "--tint-ink": ink } as CSSProperties;
+                        })()
+                      }
+                    >
+                      <span
+                        className="grid size-[30px] shrink-0 place-items-center rounded-[7px] border border-[var(--tint-line)] bg-[var(--tint)] text-[var(--tint-ink)]"
+                        aria-hidden="true"
+                      >
+                        <TypeGlyph type={type} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold leading-[1.3] text-ink group-hover:text-green-deep">
+                          {item.title}
+                        </span>
+                        <span className="mt-[2px] block truncate text-[10.5px] leading-[1.4] text-slate-soft">
+                          {TYPE_LABEL[type] ?? "Diagram"} · {timeAgo(item.updated_at)}
+                        </span>
+                      </span>
+                      {active && <span className="size-1.5 shrink-0 rounded-full bg-green" aria-label="Open" />}
+                    </button>
+                    <button
+                      className="grid w-7 shrink-0 place-items-center self-center rounded-[8px] border-none text-slate-soft opacity-0 transition-opacity hover:bg-paper hover:text-red max-[1240px]:hidden [&_svg]:size-3.5 group-focus-within:opacity-100 group-hover:opacity-100 -translate-x-0.5"
+                      onClick={() => void removeSaved(item.id)}
+                      title="Delete"
+                      aria-label={`Delete “${item.title}”`}
+                    >
+                      <Trash />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+      {diagramsFailed && (
+        <p className="text-xs leading-[1.55] text-slate">Couldn&apos;t load your saved diagrams.</p>
+      )}
 
       {failed && (
         <p className="text-xs leading-[1.55] text-slate">

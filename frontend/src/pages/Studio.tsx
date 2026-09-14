@@ -1,4 +1,5 @@
 import { ReactFlowProvider } from "@xyflow/react";
+import { useEffect } from "react";
 
 import { Canvas } from "../components/Canvas";
 import { Copilot } from "../components/Copilot";
@@ -12,6 +13,11 @@ import { useDiagram } from "../store/useDiagram";
 export default function Studio() {
   const error = useDiagram((s) => s.error);
   const clearError = useDiagram((s) => s.clearError);
+  const hydrate = useDiagram((s) => s.hydrate);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   return (
     <ReactFlowProvider>
