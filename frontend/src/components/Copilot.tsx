@@ -46,16 +46,25 @@ export function Copilot() {
   const [showImproved, setShowImproved] = useState(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const resize = usePanelResize();
 
   const busy = useDiagram((s) => s.busy);
   const improved = useDiagram((s) => s.improved);
-  const changeLog = useDiagram((s) => s.changeLog);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
   const improvePrompt = useDiagram((s) => s.improvePrompt);
   const generate = useDiagram((s) => s.generate);
   const runEdit = useDiagram((s) => s.runEdit);
   const dismissImproved = useDiagram((s) => s.dismissImproved);
+
+  // The composer grows with its content (up to a cap) so multi-line ideas
+  // get room to breathe instead of being squeezed into a one-row strip.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 176)}px`;
+  }, [input]);
 
   const appendMessage = (msg: Omit<Msg, "id">) =>
     setMessages((current) => [...current, { id: uid(), ...msg }]);
@@ -140,15 +149,17 @@ export function Copilot() {
         className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize touch-none select-none hover:bg-green-ring active:bg-green-ring"
         onPointerDown={resize.onPointerDown}
       />
-      <header className="shrink-0 border-b border-line px-3.5 pb-3 pt-3.5">
-        <h1 className="m-0 flex items-center gap-2 text-[14.5px] font-[650] tracking-[-0.01em] [&_svg]:size-[17px] [&_svg]:text-green">
-          <Sparkles />
+      <header className="shrink-0 border-b border-line px-4 pb-3 pt-4">
+        <h1 className="m-0 flex items-center gap-2.5 text-[15px] font-bold tracking-[-0.01em]">
+          <span className="grid size-[26px] shrink-0 place-items-center rounded-[9px] bg-green-soft text-green-strong [&_svg]:size-[15px]">
+            <Sparkles />
+          </span>
           AI Copilot
         </h1>
-        <p className="mt-[3px] text-[11.5px] leading-[1.4] text-slate-soft">
+        <p className="mt-[6px] text-[11.5px] leading-[1.4] text-slate-soft">
           Describe, generate, and improve your diagram.
         </p>
-        <div className="mt-[11px] flex items-center rounded-[9px] bg-paper px-[9px] py-[7px]" aria-label="Describe to Improve to Generate to Edit">
+        <div className="mt-3 flex items-center rounded-[9px] bg-paper px-[9px] py-[7px]" aria-label="Describe to Improve to Generate to Edit">
           {STEP_NAMES.map((name, index) => {
             const state = stepState(index);
             return (
@@ -169,9 +180,8 @@ export function Copilot() {
       <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3.5">
         {messages.length === 0 && !improved && (
           <p style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--slate)", padding: "4px 2px" }}>
-            Describe a process, system, or workflow below — try one of the ideas underneath the
-            box, or write your own. I&apos;ll sharpen the prompt, then generate an editable
-            diagram from it.
+            Describe a process, system, or workflow below — try one of the ideas in the box, or
+            write your own. I&apos;ll sharpen the prompt, then generate an editable diagram from it.
           </p>
         )}
 
@@ -305,25 +315,26 @@ export function Copilot() {
         <div ref={tailRef} />
       </div>
 
-      <div className="shrink-0 border-t border-line bg-surface px-3 pb-3 pt-2.5">
-        <div className="no-scrollbar mb-2 flex gap-[5px] overflow-x-auto">
-          {suggestions.map((suggestion) => (
-            <button
-              key={suggestion}
-              className={`inline-flex items-center gap-[5px] whitespace-nowrap rounded-full border bg-surface-2 px-2.5 py-1 text-[11px] font-[550] transition-all hover:border-green hover:bg-green-soft hover:text-green-deep [&_svg]:size-[11px] ${input === suggestion ? "border-green bg-green-soft text-green-deep" : "border-line text-slate"}`}
-              onClick={() => setInput(suggestion)}
-            >
-              {suggestion}
-            </button>
-          ))}
-        </div>
+      <div className="shrink-0 border-t border-line bg-surface px-3 pb-3 pt-3">
         <div
-          className="flex items-end gap-2 rounded-[11px] border border-line bg-surface py-[7px] pl-3 pr-[7px] transition-[border-color,box-shadow] focus-within:border-green focus-within:shadow-[0_0_0_3px_var(--green-ring)]"
+          className="rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface focus-within:ring-2 focus-within:ring-green-ring"
           data-composer-field
         >
+          <div className="no-scrollbar mb-1.5 flex gap-1 overflow-x-auto pb-1">
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                className={`inline-flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-full border bg-surface px-2.5 py-[5px] text-[11px] font-[550] transition-all hover:border-green hover:bg-green-soft hover:text-green-deep [&_svg]:size-[11px] ${input === suggestion ? "border-green bg-green-soft text-green-deep" : "border-line text-slate"}`}
+                onClick={() => setInput(suggestion)}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
           <textarea
-            rows={1}
-            className="max-h-24 min-w-0 flex-1 resize-none border-none bg-transparent py-1 text-[12.5px] leading-[1.5] outline-none placeholder:text-slate-soft"
+            ref={taRef}
+            rows={3}
+            className="block min-h-[70px] w-full resize-none border-none bg-transparent py-0.5 text-[13.5px] leading-[1.55] outline-none placeholder:text-slate-soft"
             value={input}
             placeholder={hasNodes ? "Tell AI what to change…" : "Describe what you want to diagram…"}
             onChange={(event) => setInput(event.target.value)}
@@ -334,26 +345,30 @@ export function Copilot() {
               }
             }}
           />
-          <button
-            className="grid size-[30px] shrink-0 place-items-center rounded-[9px] border-none bg-green text-on-accent transition-colors hover:bg-green-strong disabled:cursor-not-allowed disabled:bg-line-strong [&_svg]:size-3.5"
-            aria-label="Send"
-            disabled={!input.trim() || busy !== null}
-            onClick={send}
-          >
-            {busy !== null ? <span className="btn__spin" aria-hidden /> : <Send />}
-          </button>
+          <div className="flex items-center gap-2 pt-2">
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-slate-soft">
+              {hasNodes
+                ? "Edits the current diagram"
+                : "Improves the prompt, then generates a diagram"}
+              {" · "}
+              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
+                Ctrl
+              </kbd>
+              {" + "}
+              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
+                Enter
+              </kbd>
+            </span>
+            <button
+              className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px]"
+              aria-label="Send"
+              disabled={!input.trim() || busy !== null}
+              onClick={send}
+            >
+              {busy !== null ? <span className="btn__spin" aria-hidden /> : <Send />}
+            </button>
+          </div>
         </div>
-        <div className="mt-1.5 text-center text-[10px] text-slate-soft">
-          {hasNodes
-            ? "Describe a change — the AI edits the existing diagram."
-            : "Describe an idea — the AI improves the prompt, then generates a diagram."}
-        </div>
-      </div>
-
-      <div style={{ textAlign: "center", padding: "4px 0 10px" }}>
-        <span style={{ fontSize: 10, color: "var(--slate-soft)" }}>
-          {changeLog.length > 0 && `Last change · ${changeLog[0]}`}
-        </span>
       </div>
     </aside>
   );
