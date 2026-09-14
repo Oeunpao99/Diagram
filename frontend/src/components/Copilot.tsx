@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { usePanelResize } from "../hooks/usePanelResize";
 import { useDiagram } from "../store/useDiagram";
-import { Alert, ArrowRight, Check, LogoMark, Send, Sparkles } from "./icons";
+import { Alert, ArrowRight, Check, ImageIcon, LogoMark, Send, Sparkles, X } from "./icons";
+
+const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url cap with room to spare
 
 interface Msg {
   id: number;
@@ -45,14 +47,20 @@ export function Copilot() {
   const [input, setInput] = useState("");
   const [showImproved, setShowImproved] = useState(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
+  const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; name: string } | null>(
+    null,
+  );
+  const [attachError, setAttachError] = useState<string | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const resize = usePanelResize();
 
   const busy = useDiagram((s) => s.busy);
   const improved = useDiagram((s) => s.improved);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
   const improvePrompt = useDiagram((s) => s.improvePrompt);
+  const analyzeImage = useDiagram((s) => s.analyzeImage);
   const generate = useDiagram((s) => s.generate);
   const runEdit = useDiagram((s) => s.runEdit);
   const dismissImproved = useDiagram((s) => s.dismissImproved);
@@ -108,6 +116,18 @@ export function Copilot() {
     setInput("");
   };
 
+  /** No diagram yet, but a sketch instead of (or alongside) typed text —
+   *  same Describe step, just read from a picture. */
+  const sendImage = (image: { dataUrl: string; name: string }, caption: string) => {
+    if (busy !== null) return;
+    appendMessage({ role: "user", text: caption.trim() || `Attached ${image.name}` });
+    dismissImproved();
+    setShowImproved(false);
+    void analyzeImage(image.dataUrl, caption);
+    setAttachedImage(null);
+    setInput("");
+  };
+
   /** A diagram already exists: this is an edit instruction. */
   const sendEdit = (text: string) => {
     if (!text.trim() || busy !== null || !hasNodes) return;
@@ -117,10 +137,31 @@ export function Copilot() {
     setInput("");
   };
 
-  const send = () => (hasNodes ? sendEdit(input) : sendDescribe(input));
+  const send = () => {
+    if (hasNodes) return sendEdit(input);
+    if (attachedImage) return sendImage(attachedImage, input);
+    return sendDescribe(input);
+  };
 
-  const working: "improving" | "generating" | null =
-    busy === "improving" ? "improving" : busy === "generating" ? "generating" : null;
+  const onFilePicked = (file: File | undefined) => {
+    if (!file) return;
+    setAttachError(null);
+    if (!file.type.startsWith("image/")) {
+      setAttachError("That's not an image file.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setAttachError("That image is too large — try one under 6MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setAttachedImage({ dataUrl: String(reader.result), name: file.name });
+    reader.onerror = () => setAttachError("Couldn't read that file.");
+    reader.readAsDataURL(file);
+  };
+
+  const working: "improving" | "generating" | "analyzing" | null =
+    busy === "improving" || busy === "generating" || busy === "analyzing" ? busy : null;
 
   const stepState = (step: number): "done" | "active" | "idle" => {
     const described = messages.some((m) => m.role === "user") || Boolean(improved);
@@ -190,18 +231,23 @@ export function Copilot() {
             <span className={`grid size-6 shrink-0 place-items-center rounded-full border border-green-line text-[10px] font-[650] [&_svg]:size-3 ${message.role === "user" ? "bg-[#dcebe5] text-green-deep" : "bg-green-soft text-green-strong"}`}>
               {message.role === "ai" ? <LogoMark /> : "You"}
             </span>
-            <div className={`min-w-0 rounded-[11px] px-[11px] py-[9px] text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-br-[4px] bg-green text-on-accent" : "max-w-full whitespace-pre-wrap rounded-bl-[4px] border border-line bg-paper"}`}>
+            <div className={`min-w-0 rounded-[11px] px-[11px] py-[9px] text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-br-[4px] bg-green text-on-accent" : "max-w-full whitespace-pre-wrap rounded-bl-[4px] border border-line chat-bubble-ai"}`}>
               {message.text}
             </div>
           </div>
         ))}
 
-        {busy === "improving" && (
+        {(busy === "improving" || busy === "analyzing") && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+              {busy === "analyzing" && (
+                <div className="mb-1.5 text-[11px] font-[550] text-slate">
+                  Looking at your image…
+                </div>
+              )}
               <span className="typing">
                 <i />
                 <i />
@@ -216,7 +262,7 @@ export function Copilot() {
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
               {improved.reasoning ?? "Here's how I'd structure that."}
 
               <div className="mt-2 overflow-hidden rounded-[10px] border border-line bg-surface">
@@ -302,7 +348,7 @@ export function Copilot() {
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
               <span className="typing">
                 <i />
                 <i />
@@ -331,6 +377,31 @@ export function Copilot() {
               </button>
             ))}
           </div>
+
+          {!hasNodes && attachedImage && (
+            <div className="mb-1.5 flex items-center gap-2 rounded-[10px] border border-line bg-surface p-1.5 pr-2">
+              <img
+                src={attachedImage.dataUrl}
+                alt=""
+                className="size-9 shrink-0 rounded-[7px] border border-line object-cover"
+              />
+              <span className="min-w-0 flex-1 truncate text-[11px] font-[550] text-ink">
+                {attachedImage.name}
+              </span>
+              <button
+                className="grid size-5 shrink-0 place-items-center rounded-full border-none bg-transparent text-slate-soft transition-colors hover:bg-paper hover:text-ink [&_svg]:size-3"
+                aria-label="Remove attached image"
+                onClick={() => setAttachedImage(null)}
+              >
+                <X />
+              </button>
+            </div>
+          )}
+
+          {!hasNodes && attachError && (
+            <div className="mb-1.5 text-[11px] font-[550] text-red">{attachError}</div>
+          )}
+
           <textarea
             ref={taRef}
             rows={3}
@@ -343,7 +414,13 @@ export function Copilot() {
             // here is just redundant, not a missing affordance.
             style={{ outline: "none" }}
             value={input}
-            placeholder={hasNodes ? "Tell AI what to change…" : "Describe what you want to diagram…"}
+            placeholder={
+              hasNodes
+                ? "Tell AI what to change…"
+                : attachedImage
+                  ? "Add a caption (optional)…"
+                  : "Describe what you want to diagram…"
+            }
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter -> newline
@@ -370,10 +447,33 @@ export function Copilot() {
               </kbd>
               {" for a new line"}
             </span>
+            {!hasNodes && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(event) => {
+                    onFilePicked(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+                <button
+                  className="grid size-[30px] shrink-0 place-items-center rounded-[10px] border-none bg-transparent text-slate transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px]"
+                  aria-label="Attach an image of a diagram sketch"
+                  title="Attach an image — the AI reads it instead of typed text"
+                  disabled={busy !== null}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <ImageIcon />
+                </button>
+              </>
+            )}
             <button
               className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px]"
               aria-label="Send"
-              disabled={!input.trim() || busy !== null}
+              disabled={(!input.trim() && !attachedImage) || busy !== null}
               onClick={send}
             >
               {busy !== null ? <span className="btn__spin" aria-hidden /> : <Send />}
