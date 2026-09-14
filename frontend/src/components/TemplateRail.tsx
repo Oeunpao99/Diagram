@@ -299,7 +299,9 @@ function TemplatesPane() {
   return (
     <>
       <label className="relative">
-        <Search />
+        <span className="pointer-events-none absolute left-[10px] top-1/2 -translate-y-1/2 text-slate-soft [&_svg]:size-[14px]">
+          <Search />
+        </span>
         <input
           ref={searchRef}
           type="search"
