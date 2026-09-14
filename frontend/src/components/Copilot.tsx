@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { usePanelResize } from "../hooks/usePanelResize";
 import { useDiagram } from "../store/useDiagram";
-import { Alert, ArrowRight, Check, Send, Sparkles } from "./icons";
+import { Alert, ArrowRight, Check, LogoMark, Send, Sparkles } from "./icons";
 
 interface Msg {
   id: number;
@@ -152,7 +152,7 @@ export function Copilot() {
       <header className="shrink-0 border-b border-line px-4 pb-3 pt-4">
         <h1 className="m-0 flex items-center gap-2.5 text-[15px] font-bold tracking-[-0.01em]">
           <span className="grid size-[26px] shrink-0 place-items-center rounded-[9px] bg-green-soft text-green-strong [&_svg]:size-[15px]">
-            <Sparkles />
+            <LogoMark />
           </span>
           AI Copilot
         </h1>
@@ -188,7 +188,7 @@ export function Copilot() {
         {messages.map((message) => (
           <div key={message.id} className={`flex max-w-full gap-2 ${message.role === "user" ? "flex-row-reverse" : ""}`}>
             <span className={`grid size-6 shrink-0 place-items-center rounded-full border border-green-line text-[10px] font-[650] [&_svg]:size-3 ${message.role === "user" ? "bg-[#dcebe5] text-green-deep" : "bg-green-soft text-green-strong"}`}>
-              {message.role === "ai" ? <Sparkles /> : "You"}
+              {message.role === "ai" ? <LogoMark /> : "You"}
             </span>
             <div className={`min-w-0 rounded-[11px] px-[11px] py-[9px] text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-br-[4px] bg-green text-on-accent" : "max-w-full whitespace-pre-wrap rounded-bl-[4px] border border-line bg-paper"}`}>
               {message.text}
@@ -199,7 +199,7 @@ export function Copilot() {
         {busy === "improving" && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
-              <Sparkles />
+              <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
               <span className="typing">
@@ -214,7 +214,7 @@ export function Copilot() {
         {improved && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
-              <Sparkles />
+              <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
               {improved.reasoning ?? "Here's how I'd structure that."}
@@ -300,7 +300,7 @@ export function Copilot() {
         {busy === "editing" && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
-              <Sparkles />
+              <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line bg-paper px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
               <span className="typing">
@@ -334,7 +334,14 @@ export function Copilot() {
           <textarea
             ref={taRef}
             rows={3}
-            className="block min-h-[70px] w-full resize-none border-none bg-transparent py-0.5 text-[13.5px] leading-[1.55] outline-none placeholder:text-slate-soft"
+            className="block min-h-[70px] w-full resize-none border-none bg-transparent py-0.5 text-[13.5px] leading-[1.55] placeholder:text-slate-soft"
+            // A global `:focus-visible { outline: ... }` rule lives outside
+            // any Tailwind layer, so it beats every layered utility class
+            // regardless of specificity — only an inline style outranks it.
+            // The composer box around this textarea already shows focus via
+            // its own background/ring change, so the browser's own outline
+            // here is just redundant, not a missing affordance.
+            style={{ outline: "none" }}
             value={input}
             placeholder={hasNodes ? "Tell AI what to change…" : "Describe what you want to diagram…"}
             onChange={(event) => setInput(event.target.value)}
