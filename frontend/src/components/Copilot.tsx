@@ -317,7 +317,7 @@ export function Copilot() {
 
       <div className="shrink-0 border-t border-line bg-surface px-3 pb-3 pt-3">
         <div
-          className="rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface focus-within:ring-2 focus-within:ring-green-ring"
+          className="rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface"
           data-composer-field
         >
           <div className="no-scrollbar mb-1.5 flex gap-1 overflow-x-auto pb-1">
@@ -339,10 +339,9 @@ export function Copilot() {
             placeholder={hasNodes ? "Tell AI what to change…" : "Describe what you want to diagram…"}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                send();
-              }
+              if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter -> newline
+              event.preventDefault();
+              send();
             }}
           />
           <div className="flex items-center gap-2 pt-2">
@@ -352,12 +351,17 @@ export function Copilot() {
                 : "Improves the prompt, then generates a diagram"}
               {" · "}
               <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
-                Ctrl
+                Enter
+              </kbd>
+              {" to send · "}
+              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
+                Shift
               </kbd>
               {" + "}
               <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
                 Enter
               </kbd>
+              {" for a new line"}
             </span>
             <button
               className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px]"
