@@ -1,10 +1,14 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import DiagramsList from "./pages/DiagramsList";
 import Login from "./pages/Login";
+import ProjectDetail from "./pages/ProjectDetail";
+import Projects from "./pages/Projects";
 import Register from "./pages/Register";
 import Settings from "./pages/Settings";
 import Studio from "./pages/Studio";
+import TemplateLibrary from "./pages/TemplateLibrary";
 import { restorePanelWidth } from "./hooks/usePanelResize";
 import { useAuth } from "./store/useAuth";
 import { applyTheme, watchSystemTheme } from "./theme";
@@ -53,6 +57,54 @@ export default function App() {
         element={
           <RequireAuth>
             <Studio />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/templates"
+        element={
+          <RequireAuth>
+            <TemplateLibrary />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/diagrams"
+        element={
+          <RequireAuth>
+            <DiagramsList mode="all" />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects"
+        element={
+          <RequireAuth>
+            <Projects />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:id"
+        element={
+          <RequireAuth>
+            <ProjectDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/recent"
+        element={
+          <RequireAuth>
+            <DiagramsList mode="recent" />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/favorites"
+        element={
+          <RequireAuth>
+            <DiagramsList mode="favorites" />
           </RequireAuth>
         }
       />

@@ -12,6 +12,7 @@ Revises: 0001
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0002"
@@ -33,10 +34,16 @@ def upgrade() -> None:
         sa.Column("theme", sa.String(length=10), nullable=False, server_default="system"),
         sa.Column("accent", sa.String(length=20), nullable=False, server_default="emerald"),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
         ),
     )
     op.create_index("ix_users_email", "users", ["email"], unique=True)

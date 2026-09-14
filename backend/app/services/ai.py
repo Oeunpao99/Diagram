@@ -9,27 +9,29 @@ The pipeline from your architecture sketch, in code:
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.layout.engine import apply_layout
+from app.layout.engine import apply_layout, place_new_nodes
 from app.models import AIRun, Template
 from app.schemas.diagram import (
+    AgentAction,
+    AgentResponse,
     DiagramDoc,
     DiagramType,
     Direction,
     DocumentationResponse,
     EditResponse,
     ImprovePromptResponse,
-    Position,
+    RouteMessageResponse,
     ValidationReport,
 )
-from app.services import prompts
+from app.services import agent_tools, prompts
 from app.services.llm import LLMResult, complete
 from app.services.validator import validate
 
@@ -72,8 +74,7 @@ async def improve_prompt(
 ) -> ImprovePromptResponse:
     catalogue = await _template_catalogue(db)
     user = (
-        f"User request:\n{prompt}\n\n"
-        f"Available templates (slug — name — when to use):\n{catalogue}"
+        f"User request:\n{prompt}\n\nAvailable templates (slug — name — when to use):\n{catalogue}"
     )
     if diagram_type:
         user += f"\n\nThe user has already chosen the type: {diagram_type.value}"
@@ -101,6 +102,92 @@ async def improve_prompt(
     )
 
 
+# Belt-and-suspenders: the icon is rendered via <img src="data:image/svg+xml,...">
+# on the frontend, which already refuses to execute script content embedded in
+# an image-sourced SVG — browsers just don't run it. This strips it anyway
+# rather than leaning on that alone, and rejects anything that still looks
+# like more than one plain icon shape.
+_SVG_TAG = re.compile(r"<svg\b[^>]*>.*?</svg>", re.IGNORECASE | re.DOTALL)
+_UNSAFE_SVG = re.compile(
+    r"<script\b|<foreignObject\b|\bon[a-z]+\s*=|\bhref\s*=|\bxlink:href\s*=",
+    re.IGNORECASE,
+)
+
+
+def _clean_svg(text: str) -> str:
+    match = _SVG_TAG.search(text)
+    if not match:
+        raise ValueError("Model did not return an <svg> element.")
+    svg = match.group(0)
+    if _UNSAFE_SVG.search(svg):
+        raise ValueError("Model's SVG contained a disallowed tag or attribute.")
+    if len(svg) > 20_000:
+        raise ValueError("Model's SVG was implausibly large for an icon.")
+    # The frontend loads this as a standalone image resource
+    # (<img src="data:image/svg+xml,...">), not pasted inline into the page.
+    # Without its own xmlns, that's not a self-contained document and browsers
+    # render nothing — no broken-image icon, just silently blank. The system
+    # prompt asks for it, but don't depend on the model remembering.
+    if "xmlns=" not in svg[: svg.index(">") + 1]:
+        svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"', 1)
+    return svg
+
+
+async def generate_icon(db: AsyncSession, prompt: str) -> str:
+    if not prompt.strip():
+        raise ValueError("Describe the icon you want.")
+    try:
+        result = await complete(
+            system=prompts.GENERATE_ICON_SYSTEM,
+            user=prompt,
+            max_tokens=2000,
+            expect_json=False,
+        )
+        svg = _clean_svg(result.text)
+    except Exception as exc:
+        await _log(db, "icon", None, prompt, error=str(exc))
+        raise
+    await _log(db, "icon", result, prompt, summary=svg[:500])
+    return svg
+
+
+async def analyze_image(
+    db: AsyncSession,
+    image_data_url: str,
+    prompt: str = "",
+) -> ImprovePromptResponse:
+    """A sketch or screenshot stands in for the typed description: same
+    output shape as improve_prompt, so the rest of the pipeline — the
+    analysis card, Generate Diagram — doesn't need to know which one ran."""
+    catalogue = await _template_catalogue(db)
+    user = f"Available templates (slug — name — when to use):\n{catalogue}"
+    if prompt.strip():
+        user = f"Context from the user: {prompt}\n\n{user}"
+
+    try:
+        result = await complete(
+            system=prompts.ANALYZE_IMAGE_SYSTEM,
+            user=user,
+            model=settings.azure_openai_vision_deployment,
+            max_tokens=4000,
+            image_data_url=image_data_url,
+        )
+    except Exception as exc:
+        await _log(db, "analyze_image", None, prompt or "(image)", error=str(exc))
+        raise
+
+    await _log(db, "analyze_image", result, prompt or "(image)")
+    data = result.data
+    return ImprovePromptResponse(
+        original=prompt or "(image)",
+        improved=data.get("improved", "Could not make out a diagram in that image."),
+        missing_information=data.get("missing_information", []) or [],
+        recommended_type=_safe_type(data.get("recommended_type"), None),
+        recommended_template_slug=data.get("recommended_template_slug"),
+        reasoning=data.get("reasoning"),
+    )
+
+
 def _safe_type(value: Any, fallback: DiagramType | None) -> DiagramType:
     try:
         return DiagramType(value)
@@ -112,9 +199,7 @@ async def _template_catalogue(db: AsyncSession) -> str:
     rows = (await db.execute(select(Template).limit(60))).scalars().all()
     if not rows:
         return "(none seeded yet)"
-    return "\n".join(
-        f"- {t.slug} — {t.name} — {t.description or t.diagram_type}" for t in rows
-    )
+    return "\n".join(f"- {t.slug} — {t.name} — {t.description or t.diagram_type}" for t in rows)
 
 
 # --------------------------------------------------------------------------
@@ -170,8 +255,7 @@ async def generate_diagram(
         "generate",
         result,
         prompt,
-        summary=f"{len(doc.nodes)} nodes, {len(doc.edges)} edges, "
-        f"{len(report.issues)} issues",
+        summary=f"{len(doc.nodes)} nodes, {len(doc.edges)} edges, {len(report.issues)} issues",
     )
     return doc, report, notes
 
@@ -182,69 +266,18 @@ def _algorithm_for(doc: DiagramDoc) -> str:
     return "layered"
 
 
-# Where a new node lands relative to whatever it connects to, per direction —
-# one step forward along the flow's own axis.
-_FORWARD_STEP: dict[Direction, tuple[float, float]] = {
-    Direction.LR: (240.0, 0.0),
-    Direction.RL: (-240.0, 0.0),
-    Direction.TB: (0.0, 150.0),
-    Direction.BT: (0.0, -150.0),
-}
-_SIBLING_GAP = 120.0
-
-
-def _place_new_nodes(doc: DiagramDoc, new_ids: set[str]) -> None:
-    """Position nodes an edit introduced, without moving anything that was
-    already on the canvas. Used instead of a full relayout so "add one more
-    step" doesn't also reshuffle every node that already had a place — see
-    the needs_relayout note in prompts.py for when a full layout runs instead.
-    """
-    if not new_ids:
-        return
-    dx, dy = _FORWARD_STEP.get(doc.direction, _FORWARD_STEP[Direction.LR])
-    by_id = {n.id: n for n in doc.nodes}
-    settled = {n.id for n in doc.nodes if n.id not in new_ids}
-    anchored_count: dict[str, int] = defaultdict(int)
-    pending = [by_id[nid] for nid in new_ids if nid in by_id]
-
-    # A short chain of new nodes (A -> B -> C, all new) can anchor off each
-    # other one link at a time, without ever touching an existing node.
-    for _ in range(len(pending) or 1):
-        remaining = []
-        for node in pending:
-            neighbor_id = next(
-                (
-                    (edge.target if edge.source == node.id else edge.source)
-                    for edge in doc.edges
-                    if node.id in (edge.source, edge.target)
-                    and (edge.target if edge.source == node.id else edge.source) in settled
-                ),
-                None,
-            )
-            if neighbor_id is None:
-                remaining.append(node)
-                continue
-            anchor = by_id[neighbor_id]
-            slot = anchored_count[neighbor_id]
-            anchored_count[neighbor_id] += 1
-            node.position = Position(
-                x=anchor.position.x + dx + (slot * _SIBLING_GAP if dx == 0 else 0),
-                y=anchor.position.y + dy + (slot * _SIBLING_GAP if dy == 0 else 0),
-            )
-            settled.add(node.id)
-        pending = remaining
-        if not pending:
-            break
-
-    if pending:
-        # Nothing positioned to anchor to — an isolated node, or new nodes
-        # only connected to each other in a cycle. Cascade off the existing
-        # diagram's far edge so they land clear of everything else.
-        others = [n for n in doc.nodes if n.id not in new_ids]
-        base_x = max((n.position.x for n in others), default=0.0)
-        base_y = max((n.position.y for n in others), default=0.0)
-        for i, node in enumerate(pending):
-            node.position = Position(x=base_x + dx, y=base_y + dy + i * _SIBLING_GAP)
+# A direct ask for relayout ("improve the layout", "fix the crossing
+# connectors") is exactly the kind of instruction the edit model tends to
+# misread — it owns content, not position, so given a positioning request it
+# can go looking for *something* to change and grab the wrong thing instead
+# (recolouring a node, say) rather than reporting "nothing to change here,
+# just recompute the geometry". Catching the obvious phrasings here doesn't
+# depend on the model getting that distinction right.
+_RELAYOUT_HINTS = re.compile(
+    r"\b(layout|re-?layout|rearrange|re-?organi[sz]e|reflow|reposition"
+    r"|crossing|overlap(?:ping)?|messy|tidy|clean.?up|spread.?out|auto.?arrange)\b",
+    re.IGNORECASE,
+)
 
 
 def _coerce_doc(data: dict[str, Any], fallback_direction: Direction) -> DiagramDoc:
@@ -358,13 +391,20 @@ async def edit_diagram(
 
     new_nodes = [n for n in updated.nodes if n.id not in manual]
     # `relayout` is a client override (nothing currently sends true); the
-    # model's own "needs_relayout" read of the instruction is what normally
-    # decides. Either way, more than a couple of new nodes reshapes the flow
-    # enough that a full layout beats guessing at placement one at a time.
-    if relayout or bool(payload.get("needs_relayout")) or len(new_nodes) > 2:
+    # keyword check is a safety net for the phrasings a positioning request
+    # obviously uses; the model's own "needs_relayout" read catches ones that
+    # don't (e.g. "these two should swap sides"). Either way, more than a
+    # couple of new nodes reshapes the flow enough that a full layout beats
+    # guessing at placement one at a time.
+    if (
+        relayout
+        or bool(payload.get("needs_relayout"))
+        or _RELAYOUT_HINTS.search(instruction)
+        or len(new_nodes) > 2
+    ):
         apply_layout(updated, updated.direction, _algorithm_for(updated))
     elif new_nodes:
-        _place_new_nodes(updated, {n.id for n in new_nodes})
+        place_new_nodes(updated, {n.id for n in new_nodes})
 
     report = validate(updated)
     changes = list(payload.get("changes", [])) + repair_notes
@@ -415,3 +455,159 @@ async def explain_diagram(db: AsyncSession, doc: DiagramDoc) -> str:
     )
     await _log(db, "explain", result, "explain diagram")
     return result.text
+
+
+# --------------------------------------------------------------------------
+# 5. The agent — one chat message in, an answer or a set of applied actions out
+# --------------------------------------------------------------------------
+
+
+def _slim(doc: DiagramDoc) -> str:
+    """The doc as the model sees it. Coordinates are dropped: they cost tokens
+    and tempt it to move things, and placement isn't its job either way."""
+    return doc.model_dump_json(exclude={"nodes": {"__all__": {"position", "size"}}})
+
+
+async def run_agent(
+    db: AsyncSession,
+    doc: DiagramDoc,
+    message: str,
+    selection: list[str] | None = None,
+    edge_selection: list[str] | None = None,
+    diagram_id: uuid.UUID | None = None,
+) -> AgentResponse:
+    """The copilot chat's front door once a diagram exists.
+
+    One model call decides between three outcomes: answer the question
+    (`ask`), apply a precise list of tool calls (`act`), or hand off to the
+    whole-document edit agent for something structural (`rewrite`). Runs on
+    the fast model — it sits in front of every chat message, and the tool
+    calls it emits are checked in Python before anything is applied.
+    """
+    selection = selection or []
+    edge_selection = edge_selection or []
+
+    user = prompts.agent_user_prompt(_slim(doc), message, selection, edge_selection)
+    try:
+        result = await complete(
+            system=prompts.agent_system(agent_tools.TOOL_CATALOGUE),
+            user=user,
+            model=settings.fast_deployment,
+            max_tokens=4000,
+        )
+    except Exception as exc:
+        await _log(db, "agent", None, message, diagram_id=diagram_id, error=str(exc))
+        raise
+
+    data = result.data
+    intent = data.get("intent")
+    answer = (data.get("answer") or "").strip() or None
+
+    if intent == "ask":
+        await _log(db, "agent", result, message, diagram_id=diagram_id, summary="ask")
+        return AgentResponse(
+            intent="ask",
+            answer=answer or "I'm not sure how to answer that — could you rephrase it?",
+        )
+
+    raw_actions = data.get("actions")
+    if intent != "act" or not isinstance(raw_actions, list) or not raw_actions:
+        # Either the model asked for a rewrite outright, or it said "act" and
+        # gave nothing usable. Both are better served by the whole-document
+        # edit agent — which validates its own output — than by guessing.
+        await _log(db, "agent", result, message, diagram_id=diagram_id, summary="rewrite")
+        edited = await edit_diagram(db, doc, message, selection, diagram_id=diagram_id)
+        return AgentResponse(
+            intent="rewrite",
+            answer=answer,
+            doc=edited.doc,
+            changes=edited.changes,
+            validation=edited.validation,
+        )
+
+    calls = [
+        AgentAction(tool=str(item.get("tool", "")), args=item.get("args") or {})
+        for item in raw_actions
+        if isinstance(item, dict)
+    ]
+    outcome = agent_tools.apply_tools(doc, calls, selection)
+
+    if outcome.touched_doc:
+        doc, repair_notes = repair(doc)
+        outcome.warnings += repair_notes
+        _settle_layout(doc, outcome)
+
+    await _log(
+        db,
+        "agent",
+        result,
+        message,
+        diagram_id=diagram_id,
+        summary="act: " + "; ".join(outcome.changes)[:900],
+    )
+    return AgentResponse(
+        intent="act",
+        answer=answer,
+        doc=doc if outcome.touched_doc else None,
+        changes=outcome.changes,
+        warnings=outcome.warnings,
+        client_actions=outcome.client_actions,
+        validation=validate(doc) if outcome.touched_doc else None,
+    )
+
+
+def _settle_layout(doc: DiagramDoc, outcome: agent_tools.ToolOutcome) -> None:
+    """Give the changed document its geometry back.
+
+    A full relayout discards every position the user placed by hand, so it
+    only runs when something actually asked for it — a direction change, a
+    page fit, an explicit "tidy this up", or enough new nodes that the old
+    arrangement no longer describes the flow. Otherwise new nodes are slotted
+    in beside what they connect to and nothing else moves.
+    """
+    page = outcome.page
+    if page == "clear":
+        for key in ("page_x", "page_y", "page_width", "page_height", "page_preset"):
+            doc.meta.pop(key, None)
+        apply_layout(doc, doc.direction, _algorithm_for(doc))
+        return
+    if isinstance(page, tuple):
+        apply_layout(doc, doc.direction, _algorithm_for(doc), page[0], page[1])
+        return
+    if outcome.relayout or len(outcome.new_node_ids) > 2:
+        apply_layout(doc, doc.direction, _algorithm_for(doc))
+        return
+    place_new_nodes(doc, outcome.new_node_ids)
+
+
+async def route_message(db: AsyncSession, doc: DiagramDoc, message: str) -> RouteMessageResponse:
+    """The copilot chat's front door once a diagram exists: one message in,
+    a decision out — modify (falls through to the edit pipeline) or ask
+    (answered right here, diagram untouched). Runs on the fast model since
+    it sits in front of every chat message, edit or not."""
+    user = (
+        f"User message:\n{message}\n\n"
+        f"Diagram:\n{doc.model_dump_json(exclude={'nodes': {'__all__': {'position', 'size'}}})}"
+    )
+    try:
+        result = await complete(
+            system=prompts.ROUTE_MESSAGE_SYSTEM,
+            user=user,
+            model=settings.fast_deployment,
+            max_tokens=1500,
+        )
+    except Exception as exc:
+        await _log(db, "route", None, message, error=str(exc))
+        raise
+
+    await _log(db, "route", result, message)
+    data = result.data
+    intent = data.get("intent")
+    if intent not in ("modify", "ask"):
+        intent = "modify"  # An unparseable steer defaults to the pipeline
+        # that already validates its own output, rather than surfacing a
+        # made-up answer as if the model had actually looked at the diagram.
+    answer = (data.get("answer") or "").strip() if intent == "ask" else None
+    if intent == "ask" and not answer:
+        answer = "I'm not sure how to answer that — could you rephrase it?"
+    return RouteMessageResponse(intent=intent, answer=answer)

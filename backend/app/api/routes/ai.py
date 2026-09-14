@@ -9,16 +9,23 @@ from app.db.session import get_db
 from app.layout.engine import apply_layout
 from app.models import Diagram, DiagramVersion, User
 from app.schemas.diagram import (
+    AgentRequest,
+    AgentResponse,
+    AnalyzeImageRequest,
     DiagramDoc,
     DocumentationRequest,
     DocumentationResponse,
     EditRequest,
     EditResponse,
+    GenerateIconRequest,
+    GenerateIconResponse,
     GenerateRequest,
     GenerateResponse,
     ImprovePromptRequest,
     ImprovePromptResponse,
     LayoutRequest,
+    RouteMessageRequest,
+    RouteMessageResponse,
     ValidationReport,
 )
 from app.services import ai
@@ -40,6 +47,48 @@ async def improve_prompt(
         return await ai.improve_prompt(db, payload.prompt, payload.diagram_type)
     except Exception as exc:
         raise HTTPException(502, f"Prompt agent failed: {exc}") from exc
+
+
+# ~200KB of base64 — comfortably past a phone photo of a whiteboard at
+# reasonable resolution, well short of what would make Azure's own per-image
+# token cost blow out.
+_MAX_IMAGE_DATA_URL = 8_000_000
+
+
+@router.post("/analyze-image", response_model=ImprovePromptResponse)
+async def analyze_image(
+    payload: AnalyzeImageRequest,
+    _user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Step 1, alternate form: a sketch instead of a typed description."""
+    if not payload.image_data_url.startswith("data:image/"):
+        raise HTTPException(400, "That doesn't look like an image.")
+    if len(payload.image_data_url) > _MAX_IMAGE_DATA_URL:
+        raise HTTPException(400, "That image is too large — try a smaller one.")
+    try:
+        return await ai.analyze_image(db, payload.image_data_url, payload.prompt)
+    except Exception as exc:
+        raise HTTPException(502, f"Image analysis failed: {exc}") from exc
+
+
+@router.post("/generate-icon", response_model=GenerateIconResponse)
+async def generate_icon(
+    payload: GenerateIconRequest,
+    _user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A small SVG icon for the asset library, drawn from a description."""
+    if not payload.prompt.strip():
+        raise HTTPException(400, "Describe the icon you want.")
+    try:
+        return GenerateIconResponse(svg=await ai.generate_icon(db, payload.prompt))
+    except ValueError as exc:
+        # The model's own output failed the safety/shape check — a 502 (the
+        # model, not the caller, did something wrong) with the specific reason.
+        raise HTTPException(502, f"Icon generation failed: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Icon generation failed: {exc}") from exc
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -90,6 +139,66 @@ async def generate(
     return GenerateResponse(diagram_id=diagram_id, doc=doc, validation=report, notes=notes)
 
 
+@router.post("/route", response_model=RouteMessageResponse)
+async def route(
+    payload: RouteMessageRequest,
+    _user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The copilot chat calls this before /edit, once a diagram already
+    exists — decides whether a message is an instruction to change the
+    diagram or a question/request for ideas about it, answering the latter
+    directly instead of letting it fall through to /edit as a no-op change."""
+    if not payload.message.strip():
+        raise HTTPException(400, "Say what you'd like to know or change.")
+    try:
+        return await ai.route_message(db, payload.doc, payload.message)
+    except Exception as exc:
+        raise HTTPException(502, f"Routing failed: {exc}") from exc
+
+
+async def _assert_owns(db: AsyncSession, user: User, diagram_id: uuid.UUID | None) -> None:
+    """When the client says which diagram a call is about, check it's theirs —
+    the id is only used to stamp the AIRun audit row, but an unchecked id
+    would let one account write history onto another's diagram."""
+    if diagram_id is None:
+        return
+    owned = await db.execute(
+        select(Diagram.id).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
+    )
+    if owned.scalar_one_or_none() is None:
+        raise HTTPException(404, "Diagram not found.")
+
+
+@router.post("/agent", response_model=AgentResponse)
+async def agent(
+    payload: AgentRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The copilot chat's front door once a diagram exists.
+
+    One call decides between answering the question, applying a precise list
+    of tool calls to the document, and handing off to the whole-document edit
+    agent — see ai.run_agent. Supersedes /route + /edit as a pair; both remain
+    for callers that want one specific half.
+    """
+    if not payload.message.strip():
+        raise HTTPException(400, "Say what you'd like to know or change.")
+    await _assert_owns(db, user, payload.diagram_id)
+    try:
+        return await ai.run_agent(
+            db,
+            payload.doc,
+            payload.message,
+            payload.selection,
+            payload.edge_selection,
+            diagram_id=payload.diagram_id,
+        )
+    except Exception as exc:
+        raise HTTPException(502, f"Agent failed: {exc}") from exc
+
+
 @router.post("/edit", response_model=EditResponse)
 async def edit(
     payload: EditRequest,
@@ -102,14 +211,7 @@ async def edit(
 
     # Optional: when the client says which diagram this is, check the caller
     # owns it and stamp the AIRun row so per-diagram history actually works.
-    if payload.diagram_id:
-        owned = await db.execute(
-            select(Diagram.id).where(
-                Diagram.id == payload.diagram_id, Diagram.owner_id == user.id
-            )
-        )
-        if owned.scalar_one_or_none() is None:
-            raise HTTPException(404, "Diagram not found.")
+    await _assert_owns(db, user, payload.diagram_id)
 
     try:
         return await ai.edit_diagram(
@@ -133,7 +235,7 @@ async def check(doc: DiagramDoc, _user: User = Depends(current_user)):
 @router.post("/layout", response_model=DiagramDoc)
 async def layout(payload: LayoutRequest, _user: User = Depends(current_user)):
     """Auto arrange. Also free, also instant."""
-    return apply_layout(payload.doc, payload.direction, payload.algorithm)
+    return apply_layout(payload.doc, payload.direction, payload.algorithm, payload.width, payload.height)
 
 
 @router.post("/documentation", response_model=DocumentationResponse)

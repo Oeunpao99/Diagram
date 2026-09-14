@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-import { usePanelResize } from "../hooks/usePanelResize";
+import { usePanelCollapse, usePanelResize } from "../hooks/usePanelResize";
 import { useDiagram } from "../store/useDiagram";
-import { Alert, ArrowRight, Check, ImageIcon, LogoMark, Send, Sparkles, UserIcon, X } from "./icons";
+import {
+  Alert,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  ImageIcon,
+  LogoMark,
+  Send,
+  Sparkles,
+  UserIcon,
+  X,
+} from "./icons";
 
 const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url cap with room to spare
 
@@ -20,16 +31,27 @@ const STARTER_IDEAS = [
   "Microservice deployment pipeline",
 ];
 
-/** Once a diagram exists, these describe edits instead. */
+/** Once a diagram exists, these describe edits instead — one per thing the
+ *  agent can do, so the range is discoverable without reading docs: a
+ *  structural change, a layout action, a question, a canvas action. */
 const EDIT_SUGGESTIONS = [
   "Add a rejection path",
-  "Make this a swimlane",
-  "Improve the layout",
-  "Simplify this diagram",
+  "Make it top-down",
+  "Explain this diagram",
+  "Fit it to a slide",
+  "Give me ideas to improve this",
 ];
 
 function uid(): number {
   return Date.now() + Math.floor(Math.random() * 1e5);
+}
+
+/** A capped bullet list, with a tail line when there was more than fits. */
+function bullets(lines: string[], limit: number): string {
+  const shown = lines.slice(0, limit).map((line) => `  • ${line}`);
+  const rest = lines.length - shown.length;
+  if (rest > 0) shown.push(`  • …and ${rest} more`);
+  return shown.join("\n");
 }
 
 /** "process_flow" -> "Process Flow" */
@@ -51,18 +73,21 @@ export function Copilot() {
     null,
   );
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const tailRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const resize = usePanelResize();
+  const { collapsed, toggle: toggleCollapsed } = usePanelCollapse();
 
   const busy = useDiagram((s) => s.busy);
+  const editPhase = useDiagram((s) => s.editPhase);
   const improved = useDiagram((s) => s.improved);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
   const improvePrompt = useDiagram((s) => s.improvePrompt);
   const analyzeImage = useDiagram((s) => s.analyzeImage);
   const generate = useDiagram((s) => s.generate);
-  const runEdit = useDiagram((s) => s.runEdit);
+  const sendChatMessage = useDiagram((s) => s.sendChatMessage);
   const dismissImproved = useDiagram((s) => s.dismissImproved);
 
   // The composer grows with its content (up to a cap) so multi-line ideas
@@ -77,17 +102,27 @@ export function Copilot() {
   const appendMessage = (msg: Omit<Msg, "id">) =>
     setMessages((current) => [...current, { id: uid(), ...msg }]);
 
-  // Acknowledge finished edits once `busy` settles back to idle.
+  // Acknowledge a finished send once `busy` settles back to idle. The agent
+  // can come back with any combination of three things: something to say, a
+  // list of what it changed, and a list of what it couldn't — a question is
+  // just the first on its own, a clean edit the second.
   useEffect(() => {
     if (!pendingText || busy !== null) return;
-    const fresh = useDiagram.getState().changeLog;
-    appendMessage({
-      role: "ai",
-      text:
-        fresh.length > 0
-          ? `Done. I made these changes:\n${fresh.slice(0, 3).map((c) => `  • ${c}`).join("\n")}`
-          : pendingText,
-    });
+    const { chatAnswer, changeLog, chatWarnings } = useDiagram.getState();
+
+    const parts: string[] = [];
+    if (chatAnswer) parts.push(chatAnswer);
+    if (changeLog.length > 0) {
+      parts.push(
+        (chatAnswer ? "" : "Done. I made these changes:\n") + bullets(changeLog, 6),
+      );
+    }
+    if (chatWarnings.length > 0) {
+      parts.push(`I couldn't do all of it:\n${bullets(chatWarnings, 4)}`);
+    }
+
+    appendMessage({ role: "ai", text: parts.join("\n\n") || pendingText });
+    useDiagram.setState({ chatAnswer: null, chatWarnings: [] });
     setPendingText(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy, pendingText]);
@@ -128,12 +163,14 @@ export function Copilot() {
     setInput("");
   };
 
-  /** A diagram already exists: this is an edit instruction. */
+  /** A diagram already exists: could be an instruction to change it, a
+   *  question about it, or a request for ideas — sendChatMessage sorts out
+   *  which before anything touches the diagram. */
   const sendEdit = (text: string) => {
     if (!text.trim() || busy !== null || !hasNodes) return;
     appendMessage({ role: "user", text });
     setPendingText("The edit is applied to the diagram.");
-    void runEdit(text);
+    void sendChatMessage(text);
     setInput("");
   };
 
@@ -163,19 +200,29 @@ export function Copilot() {
   const working: "improving" | "generating" | "analyzing" | null =
     busy === "improving" || busy === "generating" || busy === "analyzing" ? busy : null;
 
-  const stepState = (step: number): "done" | "active" | "idle" => {
-    const described = messages.some((m) => m.role === "user") || Boolean(improved);
-    const states: ("done" | "active" | "idle")[] = [
-      described || hasNodes ? "done" : "active",
-      improved || hasNodes ? "done" : busy === "improving" ? "active" : described ? "active" : "idle",
-      hasNodes ? "done" : busy === "generating" ? "active" : improved ? "active" : "idle",
-      hasNodes ? "active" : "idle",
-    ];
-    return states[step];
-  };
-
-  const STEP_NAMES = ["Describe", "Improve", "Generate", "Edit"];
   const suggestions = hasNodes ? EDIT_SUGGESTIONS : STARTER_IDEAS;
+
+  if (collapsed) {
+    return (
+      <aside
+        className="relative flex min-h-0 flex-col items-center border-l border-line bg-surface pt-3 max-[1240px]:hidden"
+        data-copilot
+        aria-label="Kumnous AI (collapsed)"
+      >
+        <button
+          className="grid size-8 shrink-0 place-items-center rounded-[9px] border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-ink [&_svg]:size-[15px]"
+          onClick={toggleCollapsed}
+          title="Expand Kumnous AI"
+          aria-label="Expand Kumnous AI"
+        >
+          <ChevronLeft />
+        </button>
+        <span className="mt-3 grid size-[26px] shrink-0 place-items-center rounded-[9px] bg-green-soft text-green-strong [&_svg]:size-[15px]">
+          <LogoMark />
+        </span>
+      </aside>
+    );
+  }
 
   return (
     <aside
@@ -186,36 +233,30 @@ export function Copilot() {
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize AI Copilot panel"
+        aria-label="Resize Kumnous AI panel"
         className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize touch-none select-none hover:bg-green-ring active:bg-green-ring"
         onPointerDown={resize.onPointerDown}
       />
       <header className="shrink-0 border-b border-line px-4 pb-3 pt-4">
-        <h1 className="m-0 flex items-center gap-2.5 text-[15px] font-bold tracking-[-0.01em]">
-          <span className="grid size-[26px] shrink-0 place-items-center rounded-[9px] bg-green-soft text-green-strong [&_svg]:size-[15px]">
-            <LogoMark />
-          </span>
-          AI Copilot
-        </h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="m-0 flex items-center gap-2.5 text-[15px] font-bold tracking-[-0.01em]">
+            <span className="grid size-[26px] shrink-0 place-items-center rounded-[9px] bg-green-soft text-green-strong [&_svg]:size-[15px]">
+              <LogoMark />
+            </span>
+            Kumnous AI
+          </h1>
+          <button
+            className="grid size-7 shrink-0 place-items-center rounded-[9px] border-none bg-transparent text-slate transition-colors hover:bg-paper hover:text-ink [&_svg]:size-[13px]"
+            onClick={toggleCollapsed}
+            title="Collapse Kumnous AI"
+            aria-label="Collapse Kumnous AI"
+          >
+            <ChevronRight />
+          </button>
+        </div>
         <p className="mt-[6px] text-[11.5px] leading-[1.4] text-slate-soft">
           Describe, generate, and improve your diagram.
         </p>
-        <div className="mt-3 flex items-center rounded-[9px] bg-paper px-[9px] py-[7px]" aria-label="Describe to Improve to Generate to Edit">
-          {STEP_NAMES.map((name, index) => {
-            const state = stepState(index);
-            return (
-              <span key={name} className={`flex items-center gap-[5px] text-[10px] font-semibold transition-colors ${state === "active" ? "text-green-deep" : state === "done" ? "text-green" : "text-slate-soft"}`}>
-                <span className="grid size-4 place-items-center rounded-full border-[1.5px] border-current bg-surface [&_svg]:size-[9px] [&_svg]:stroke-[2.6]">
-                  {state === "done" ? <Check /> : index + 1}
-                </span>
-                {name}
-                {index < STEP_NAMES.length - 1 && (
-                  <span className={`mx-1.5 h-[1.5px] flex-1 rounded-[2px] ${state === "done" ? "bg-green" : state === "active" ? "bg-green-line" : "bg-line-strong"}`} />
-                )}
-              </span>
-            );
-          })}
-        </div>
       </header>
 
       <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3.5">
@@ -231,7 +272,10 @@ export function Copilot() {
             <span className={`grid size-7 shrink-0 place-items-center rounded-full border border-green-line [&_svg]:size-[15px] ${message.role === "user" ? "bg-[#dcebe5] text-green-deep" : "bg-green-soft text-green-strong"}`}>
               {message.role === "ai" ? <LogoMark /> : <UserIcon />}
             </span>
-            <div className={`min-w-0 rounded-[11px] px-[11px] py-[9px] text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-br-[4px] bg-green text-on-accent" : "max-w-full whitespace-pre-wrap rounded-bl-[4px] border border-line chat-bubble-ai"}`}>
+            {/* The user's own message keeps its bubble so you can pick your
+                turns out at a glance; the AI's reply is bare text — a border
+                around every answer just boxes in the thing you're reading. */}
+            <div className={`min-w-0 text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-[11px] rounded-br-[4px] bg-green px-[11px] py-[9px] text-on-accent" : "max-w-full whitespace-pre-wrap py-[5px] text-ink"}`}>
               {message.text}
             </div>
           </div>
@@ -242,7 +286,7 @@ export function Copilot() {
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
               {busy === "analyzing" && (
                 <div className="mb-1.5 text-[11px] font-[550] text-slate">
                   Looking at your image…
@@ -262,7 +306,7 @@ export function Copilot() {
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
               {improved.reasoning ?? "Here's how I'd structure that."}
 
               <div className="mt-2 overflow-hidden rounded-[10px] border border-line bg-surface">
@@ -348,7 +392,13 @@ export function Copilot() {
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
+              {/* Two real phases, not a fake timer — sendChatMessage genuinely
+                  makes two sequential requests (classify, then apply), so
+                  this tracks which one is actually in flight. */}
+              <div className="mb-1.5 text-[11px] font-[550] text-slate">
+                {editPhase === "checking" ? "Reading your diagram…" : "Applying the change…"}
+              </div>
               <span className="typing">
                 <i />
                 <i />
@@ -363,9 +413,28 @@ export function Copilot() {
 
       <div className="shrink-0 border-t border-line bg-surface px-3 pb-3 pt-3">
         <div
-          className="rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface"
+          className={`relative rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface ${dragOver ? "ring-2 ring-green-ring" : ""}`}
           data-composer-field
+          onDragOver={(event) => {
+            if (hasNodes || !event.dataTransfer.types.includes("Files")) return;
+            event.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget === event.target) setDragOver(false);
+          }}
+          onDrop={(event) => {
+            if (hasNodes) return;
+            event.preventDefault();
+            setDragOver(false);
+            onFilePicked(event.dataTransfer.files?.[0]);
+          }}
         >
+          {dragOver && (
+            <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[16px] border-2 border-dashed border-green bg-[rgba(13,159,110,0.08)] text-[12.5px] font-[600] text-green-deep">
+              Drop image to attach
+            </div>
+          )}
           <div className="no-scrollbar mb-1.5 flex gap-1 overflow-x-auto pb-1">
             {suggestions.map((suggestion) => (
               <button
@@ -416,7 +485,7 @@ export function Copilot() {
             value={input}
             placeholder={
               hasNodes
-                ? "Tell AI what to change…"
+                ? "Change something, ask a question, or get ideas…"
                 : attachedImage
                   ? "Add a caption (optional)…"
                   : "Describe what you want to diagram…"
@@ -431,7 +500,7 @@ export function Copilot() {
           <div className="flex items-center gap-2 pt-2">
             <span className="min-w-0 flex-1 truncate text-[10.5px] text-slate-soft">
               {hasNodes
-                ? "Edits the current diagram"
+                ? "Edits, rearranges, explains — say “these” for what's selected"
                 : "Improves the prompt, then generates a diagram"}
               {" · "}
               <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">

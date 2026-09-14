@@ -35,19 +35,29 @@ export function useCanvasAssets() {
     });
   };
 
+  /** Any already-encoded "data:..." URL — an uploaded file after FileReader,
+   *  or an AI-generated SVG built straight from a string, no File involved. */
+  const addImageDataUrl = (
+    dataUrl: string,
+    label: string,
+    position?: { x: number; y: number },
+    size?: { width: number; height: number },
+  ) => {
+    addNode({
+      id: `img_${Date.now().toString(36)}`,
+      label,
+      kind: "note",
+      position: position ?? centerPoint(),
+      imageUrl: dataUrl,
+      size,
+    });
+  };
+
   const addImage = (file: File, position?: { x: number; y: number }) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      addNode({
-        id: `img_${Date.now().toString(36)}`,
-        label: file.name,
-        kind: "note",
-        position: position ?? centerPoint(),
-        imageUrl: String(reader.result),
-      });
-    };
+    reader.onload = () => addImageDataUrl(String(reader.result), file.name, position);
     reader.readAsDataURL(file);
   };
 
-  return { addShape, addImage };
+  return { addShape, addImage, addImageDataUrl };
 }

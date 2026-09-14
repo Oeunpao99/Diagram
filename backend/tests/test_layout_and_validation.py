@@ -44,6 +44,126 @@ class TestLayout:
         y = {n.id: n.position.y for n in doc.nodes}
         assert y["a"] < y["b"] < y["c"]
 
+    def test_back_edge_is_routed_off_the_forward_corridor(self):
+        """A rejection/retry loop back to an earlier step defaults to the same
+        right->left ports the forward flow uses, and ends up drawn through the
+        same visual corridor — this is what makes long back-references look
+        "stuck together" with everything else on a busy diagram. Routing it
+        via top/bottom instead keeps it out of that corridor."""
+        doc = doc_from(
+            nodes=[
+                {"id": "a", "label": "Start", "kind": "start"},
+                {"id": "b", "label": "Review", "kind": "process"},
+                {"id": "c", "label": "Approved?", "kind": "decision"},
+                {"id": "d", "label": "Done", "kind": "end"},
+            ],
+            edges=[
+                {"id": "1", "source": "a", "target": "b"},
+                {"id": "2", "source": "b", "target": "c"},
+                {"id": "3", "source": "c", "target": "d", "label": "Yes"},
+                # Rejected -> back to Review. This is the one riding the
+                # forward corridor before the fix.
+                {"id": "4", "source": "c", "target": "b", "label": "No, revise"},
+            ],
+        )
+        result = apply_layout(doc, Direction.LR)
+        by_id = {e.id: e for e in result.edges}
+
+        assert by_id["1"].source_handle is None
+        assert by_id["1"].target_handle is None
+        assert by_id["4"].source_handle == "b"
+        assert by_id["4"].target_handle == "t"
+
+    def test_edge_routing_never_overrides_a_chosen_handle(self):
+        """A handle the user (or a previous relayout) already set is never
+        silently reverted, even if it now looks like a forward edge."""
+        doc = doc_from(
+            nodes=[
+                {"id": "a", "label": "Start", "kind": "start"},
+                {"id": "b", "label": "End", "kind": "end"},
+            ],
+            edges=[{"id": "1", "source": "a", "target": "b", "target_handle": "t"}],
+        )
+        result = apply_layout(doc, Direction.LR)
+        edge = result.edges[0]
+        assert edge.target_handle == "t"
+        # Only the one handle was set by hand — the other stays whatever the
+        # router would have picked, not silently paired up to match.
+        assert edge.source_handle is None
+
+    def test_fit_to_box_keeps_flow_left_to_right(self):
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 800, 600)
+        x = {n.id: n.position.x for n in doc.nodes}
+        # Wrapping folds layers into rows, so ordering holds inside a row
+        # (a→b→c share the first row) rather than across the whole canvas.
+        assert x["a"] < x["b"] < x["c"]
+        # d and e are siblings in the same layer — they share x and differ on y.
+        assert x["d"] == x["e"]
+
+    def test_fit_to_box_contains_every_node(self):
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 640, 480)
+        for n in doc.nodes:
+            assert n.position.x >= 0
+            assert n.position.y >= 0
+            assert n.position.x + n.size.width <= 640.0 + 1e-6
+            assert n.position.y + n.size.height <= 480.0 + 1e-6
+
+    def test_fit_to_box_wraps_long_flows(self):
+        """A rigidly tall page must fold a long layered chain into rows
+        instead of running off the bottom of the box."""
+        many = doc_from(
+            nodes=[{"id": f"n{i}", "label": f"Step {i}"} for i in range(14)],
+            edges=[
+                {"id": str(i), "source": f"n{i}", "target": f"n{i + 1}"}
+                for i in range(13)
+            ],
+        )
+        doc = apply_layout(many, Direction.LR, "layered", 600, 400)
+        y = [n.position.y for n in doc.nodes]
+        assert max(y) - min(y) <= 400.0 + 1e-6
+
+    def test_fit_to_box_is_centred_in_page(self):
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 2000, 2000)
+        xs = [n.position.x for n in doc.nodes]
+        xs_max = max(n.position.x + n.size.width for n in doc.nodes)
+        assert 0 < min(xs)
+        assert xs_max < 2000.0
+        # Graph is centred: left margin ~ right margin.
+        assert abs(min(xs) - (2000.0 - xs_max)) < 40
+
+    def test_fit_to_box_records_page_meta(self):
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 1600, 900)
+        assert doc.meta["page_width"] == 1600
+        assert doc.meta["page_height"] == 900
+        assert doc.meta["page_x"] == 0
+        assert doc.meta["page_y"] == 0
+
+    def test_clear_target_removes_page_meta(self):
+        doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 1600, 900)
+        assert "page_width" in doc.meta
+        apply_layout(doc, Direction.LR, "layered")
+        assert not any(k.startswith("page_") for k in doc.meta)
+
+    def test_fit_to_box_swimlane_fits_and_separates(self):
+        doc = doc_from(
+            nodes=[
+                {"id": "a", "label": "Submit", "lane": "l1"},
+                {"id": "b", "label": "Review", "lane": "l2"},
+            ],
+            edges=[{"id": "1", "source": "a", "target": "b"}],
+            lanes=[
+                {"id": "l1", "label": "Customer", "order": 0},
+                {"id": "l2", "label": "Operations", "order": 1},
+            ],
+            diagram_type="swimlane",
+        )
+        apply_layout(doc, Direction.LR, "swimlane", 800, 600)
+        y = {n.id: n.position.y for n in doc.nodes}
+        assert y["a"] != y["b"]
+        for n in doc.nodes:
+            assert n.position.x + n.size.width <= 800.0 + 1e-6
+            assert n.position.y + n.size.height <= 600.0 + 1e-6
+
     def test_rl_mirrors_lr(self):
         doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.RL)
         x = {n.id: n.position.x for n in doc.nodes}

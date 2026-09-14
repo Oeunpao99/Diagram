@@ -13,7 +13,7 @@ if settings.app_env != "local" and settings.jwt_secret == DEV_JWT_SECRET:
     )
 
 app = FastAPI(
-    title="Diagram Copilot API",
+    title="Kumnous-គំនូស API",
     version="0.1.0",
     description="Prompt in, structured diagram out — then keep editing it by talking to it.",
 )

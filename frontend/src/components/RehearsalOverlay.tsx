@@ -129,12 +129,19 @@ export function RehearsalOverlay({ doc, transform, onDone }: RehearsalOverlayPro
       const s = nodeX.get(edge.source);
       const t = nodeX.get(edge.target);
       if (!s || !t) return;
-      const sx = s.position.x + s.size.width / 2;
-      const sy = s.position.y + s.size.height / 2;
-      const txp = t.position.x + t.size.width / 2;
-      const typ = t.position.y + t.size.height / 2;
+      const sCy = s.position.y + s.size.height / 2;
+      const tCy = t.position.y + t.size.height / 2;
+      const dir = t.position.x + t.size.width / 2 >= s.position.x + s.size.width / 2 ? 1 : -1;
+      // Every outline() shape is horizontally symmetric and reaches its full
+      // half-width exactly at its own vertical centre, so leaving from the
+      // node's left/right edge (instead of its centre) lands the line right
+      // on the silhouette for every shape, not just rectangles — the sketch
+      // line never has to cross the shape's translucent fill to get there.
+      const sx = dir === 1 ? s.position.x + s.size.width : s.position.x;
+      const sy = sCy;
+      const txp = dir === 1 ? t.position.x : t.position.x + t.size.width;
+      const typ = tCy;
       const mx = (sx + txp) / 2;
-      const dir = txp >= mx ? 1 : -1;
 
       const delay = outlinesEnd + index * perEdge;
       item.push({

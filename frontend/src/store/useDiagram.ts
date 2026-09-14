@@ -4,11 +4,13 @@ import { api } from "../api/client";
 import {
   emptyDoc,
   normalizeDoc,
+  type AgentAction,
   type DiagramDoc,
   type Direction,
   type ImprovedPrompt,
   type ValidationReport,
 } from "../api/types";
+import { withoutPageKeys, type PageTarget } from "../lib/pagePresets";
 import { useSettings } from "./useSettings";
 
 type Busy =
@@ -20,15 +22,37 @@ type Busy =
   | "documenting"
   | "analyzing";
 
+/** Sub-state of `busy === "editing"` — sendChatMessage genuinely runs two
+ *  sequential requests (classify, then apply), so the Copilot panel can show
+ *  which one is actually in flight instead of one undifferentiated spinner. */
+type EditPhase = "checking" | "updating" | null;
+
 interface DiagramState {
   doc: DiagramDoc;
   diagramId: string | null;
+  /** The project the open diagram belongs to, if any — drives the
+   *  breadcrumb. Not part of `doc`: it's metadata on the saved Diagram row,
+   *  not diagram content, so it doesn't travel through save/load the way
+   *  nodes and edges do. */
+  projectId: string | null;
   validation: ValidationReport | null;
   improved: ImprovedPrompt | null;
   changeLog: string[];
+  /** Set by sendChatMessage when a chat message turned out to be a question
+   *  or a request for ideas rather than an edit instruction — the diagram is
+   *  untouched, this is what the Copilot panel should say back instead of
+   *  its usual "I made these changes" summary. Consumed (cleared) by the
+   *  panel once it's been shown as a message. */
+  chatAnswer: string | null;
+  /** Steps the agent wanted to take but couldn't — a node it named that
+   *  isn't there, a tool call that didn't parse. Shown after the change list
+   *  so a partly-applied instruction doesn't read as a finished one.
+   *  Consumed (cleared) by the Copilot panel alongside `chatAnswer`. */
+  chatWarnings: string[];
   selection: string[];
   edgeSelection: string[];
   busy: Busy;
+  editPhase: EditPhase;
   error: string | null;
 
   past: DiagramDoc[];
@@ -51,8 +75,10 @@ interface DiagramState {
   hydrate: () => Promise<void>;
   /** Open a saved diagram and make it the one autosave writes to. */
   loadDiagram: (id: string) => Promise<void>;
-  /** Detach from the current diagram so the next edit starts a fresh record. */
-  beginNew: () => void;
+  /** Detach from the current diagram so the next edit starts a fresh record.
+   *  An optional projectId scopes that record to a project the moment
+   *  autosave first creates it — see `pendingProjectId` below. */
+  beginNew: (projectId?: string) => void;
   bumpSaved: () => void;
 
   improvePrompt: (prompt: string) => Promise<void>;
@@ -60,7 +86,15 @@ interface DiagramState {
   dismissImproved: () => void;
   generate: (prompt: string, templateSlug?: string | null) => Promise<void>;
   runEdit: (instruction: string) => Promise<void>;
-  autoLayout: (direction?: Direction) => Promise<void>;
+  /** The copilot chat's actual entry point once a diagram exists — classifies
+   *  the message first (see api.routeMessage) and only calls runEdit when
+   *  it's genuinely an instruction to change something. A question or a
+   *  request for ideas is answered via `chatAnswer` instead, diagram
+   *  untouched. Falls through to runEdit if classification itself fails,
+   *  so a backend hiccup degrades to the old always-edit behaviour rather
+   *  than silently dropping the message. */
+  sendChatMessage: (message: string) => Promise<void>;
+  autoLayout: (direction?: Direction, size?: PageTarget | null) => Promise<void>;
   revalidate: () => Promise<void>;
 }
 
@@ -101,6 +135,11 @@ let persisting = false;
 /** Set right before a programmatic doc load (hydrate/open) so the one-time
  *  doc swap that those cause doesn't echo an autosave of the same content. */
 let suppressNextAutosave = false;
+/** The project the *next* diagram autosave creates should belong to — set by
+ *  beginNew(projectId) and consumed (then cleared) the moment that first
+ *  create actually happens, since autosave — not the caller — is what
+ *  decides when a brand-new blank doc turns into a real saved row. */
+let pendingProjectId: string | undefined;
 
 function schedulePersist(delay = 900) {
   if (persistTimer) clearTimeout(persistTimer);
@@ -130,7 +169,8 @@ async function persist() {
     if (diagramId) {
       await api.saveDiagram(diagramId, doc);
     } else {
-      const created = await api.createDiagram(doc);
+      const created = await api.createDiagram(doc, pendingProjectId);
+      pendingProjectId = undefined;
       writeStoredDiagramId(created.id);
       useDiagram.setState({ diagramId: created.id });
     }
@@ -142,15 +182,49 @@ async function persist() {
   }
 }
 
+/* --------------------------------------------------------------------------
+   Client actions. The agent can ask for things that don't live in the
+   document at all — undo, or a viewport change. Undo/redo/select are store
+   operations; the viewport ones belong to the React Flow instance, which only
+   exists inside the Canvas, so those go out as an event it listens for.
+   -------------------------------------------------------------------------- */
+
+/** Viewport actions the Canvas picks up. Fired on `window`. */
+export const CANVAS_ACTION_EVENT = "canvas:action";
+
+function runClientAction(action: AgentAction) {
+  const state = useDiagram.getState();
+  switch (action.tool) {
+    case "undo":
+      state.undo();
+      return;
+    case "redo":
+      state.redo();
+      return;
+    case "select":
+      state.setSelection(action.args.ids ?? []);
+      return;
+    case "fit_view":
+    case "zoom_in":
+    case "zoom_out":
+      window.dispatchEvent(new CustomEvent(CANVAS_ACTION_EVENT, { detail: action.tool }));
+      return;
+  }
+}
+
 export const useDiagram = create<DiagramState>((set, get) => ({
   doc: emptyDoc(),
   diagramId: null,
+  projectId: null,
   validation: null,
   improved: null,
   changeLog: [],
+  chatAnswer: null,
+  chatWarnings: [],
   selection: [],
   edgeSelection: [],
   busy: null,
+  editPhase: null,
   error: null,
   past: [],
   future: [],
@@ -205,6 +279,7 @@ export const useDiagram = create<DiagramState>((set, get) => ({
         set({
           doc: normalizeDoc(result.data),
           diagramId: result.id,
+          projectId: result.project_id,
           hydrated: true,
         });
         return;
@@ -223,6 +298,7 @@ export const useDiagram = create<DiagramState>((set, get) => ({
       set((state) => ({
         doc: normalizeDoc(result.data),
         diagramId: result.id,
+        projectId: result.project_id,
         validation: null,
         changeLog: [],
         improved: null,
@@ -238,10 +314,12 @@ export const useDiagram = create<DiagramState>((set, get) => ({
     }
   },
 
-  beginNew: () => {
+  beginNew: (projectId) => {
+    pendingProjectId = projectId;
     writeStoredDiagramId(null);
     set({
       diagramId: null,
+      projectId: projectId ?? null,
       validation: null,
       changeLog: [],
       improved: null,
@@ -304,7 +382,7 @@ export const useDiagram = create<DiagramState>((set, get) => ({
 
   runEdit: async (instruction) => {
     const { doc, selection } = get();
-    set({ busy: "editing", error: null });
+    set({ busy: "editing", editPhase: "updating", error: null });
     try {
       const result = await api.edit(doc, instruction, selection, false, get().diagramId);
       set((state) => ({
@@ -317,16 +395,82 @@ export const useDiagram = create<DiagramState>((set, get) => ({
     } catch (error) {
       set({ error: message(error) });
     } finally {
-      set({ busy: null });
+      set({ busy: null, editPhase: null });
     }
   },
 
-  autoLayout: async (direction) => {
+  sendChatMessage: async (text) => {
+    const { doc, selection, edgeSelection, diagramId } = get();
+    set({
+      busy: "editing",
+      editPhase: "checking",
+      error: null,
+      chatAnswer: null,
+      chatWarnings: [],
+    });
+
+    let result;
+    try {
+      result = await api.agent(doc, text, selection, edgeSelection, diagramId);
+    } catch {
+      // The agent itself failed — fall through to the whole-document edit
+      // pipeline rather than dropping the user's message on a backend
+      // hiccup. That path validates its own output.
+      set({ editPhase: "updating" });
+      await get().runEdit(text);
+      return;
+    }
+
+    if (result.intent === "ask") {
+      set({ chatAnswer: result.answer, busy: null, editPhase: null });
+      return;
+    }
+
+    // A "rewrite" already ran through the edit agent server-side, so both
+    // remaining intents arrive the same way: a finished doc, or none at all
+    // when only the canvas was touched ("undo that", "zoom out").
+    set((state) => ({
+      ...(result.doc
+        ? {
+            doc: result.doc,
+            past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
+            future: [],
+          }
+        : null),
+      validation: result.validation ?? state.validation,
+      changeLog: result.changes,
+      chatAnswer: result.answer ?? null,
+      chatWarnings: result.warnings,
+      busy: null,
+      editPhase: null,
+    }));
+
+    // Run these after the doc lands, so an "undo" or "fit view" the agent
+    // asked for applies to the state the user is about to see. undo/redo
+    // read the history the set() above just pushed onto.
+    for (const action of result.client_actions) runClientAction(action);
+  },
+
+  autoLayout: async (direction, size) => {
     const { doc } = get();
     const algorithm = (doc.lanes ?? []).length > 1 ? "swimlane" : "layered";
     set({ busy: "laying-out", error: null });
     try {
-      const next = await api.layout(doc, direction ?? doc.direction, algorithm);
+      const meta = size
+        ? {
+            ...doc.meta,
+            page_width: size.width,
+            page_height: size.height,
+            ...(size.id ? { page_preset: size.id } : {}),
+          }
+        : withoutPageKeys(doc.meta);
+      const payload = { ...doc, meta };
+      const next = await api.layout(
+        payload,
+        direction ?? doc.direction,
+        algorithm,
+        size ? { width: size.width, height: size.height } : null,
+      );
       set((state) => ({
         doc: next,
         past: [...state.past, state.doc].slice(-HISTORY_LIMIT),

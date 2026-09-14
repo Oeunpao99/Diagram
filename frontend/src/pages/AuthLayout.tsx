@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { LogoMark } from "../components/icons";
 import { ThemeToggle } from "../components/ThemeToggle";
 
 /** Shared shell for the signed-out screens. */
@@ -22,9 +23,11 @@ export function AuthLayout({
 
       <div className="w-full max-w-[400px] rounded-2xl border border-line bg-surface p-8 shadow-2 max-[560px]:px-5 max-[560px]:py-6">
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="size-[26px] rounded-lg bg-[linear-gradient(135deg,var(--green),var(--green-deep))]" aria-hidden="true" />
+          <span className="grid size-[26px] place-items-center rounded-lg bg-[linear-gradient(135deg,var(--green),var(--green-deep))] text-on-accent [&_svg]:size-[15px]">
+            <LogoMark />
+          </span>
           <span className="text-[15px] font-semibold tracking-[-0.01em] text-ink-strong">
-            Diagram Copilot
+            Kumnous-គំនូស
           </span>
         </div>
 

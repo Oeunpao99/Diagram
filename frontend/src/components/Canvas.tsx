@@ -4,6 +4,7 @@ import {
   MiniMap,
   ReactFlow,
   addEdge,
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   useReactFlow,
@@ -14,27 +15,41 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fromFlow, makeNode, toFlow, type FlowNode, type FlowNodeData } from "../api/adapter";
-import type { DiagramDoc, DiagramEdge, EdgeCurve, EdgeStyle, NodeKind } from "../api/types";
-import { useDiagram } from "../store/useDiagram";
+import {
+  fromFlow,
+  makeNode,
+  toFlow,
+  type FlowNode,
+  type FlowNodeData,
+} from "../api/adapter";
+import { registerExportRuntime } from "../api/exportUtils";
+import type {
+  DiagramDoc,
+  DiagramEdge,
+  EdgeArrow,
+  EdgeCurve,
+  EdgeStyle,
+  NodeKind,
+} from "../api/types";
+import { takeSkipNextDocFit } from "../lib/docFit";
+import { iconToDataUrl } from "../lib/iconToDataUrl";
+import { pageRectFromMeta } from "../lib/pagePresets";
+import { CANVAS_ACTION_EVENT, useDiagram } from "../store/useDiagram";
 import { useSettings } from "../store/useSettings";
 import { AiSuggestion } from "./AiSuggestion";
 import { AssetsDock } from "./AssetsDock";
 import { CanvasToolbar, type Tool } from "./CanvasToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
-import { RehearsalOverlay } from "./RehearsalOverlay";
-import { SelectionToolbar } from "./SelectionToolbar";
+import { ICON_CATALOG } from "./iconCatalog";
 import { nodeTypes } from "./nodes";
-import { takeSkipNextDocFit } from "../lib/docFit";
+import { RehearsalOverlay } from "./RehearsalOverlay";
+import { StylePanel } from "./StylePanel";
 
-/** AI operations whose result gets the "pen is drawing this" rehearsal — a
- *  brand-new or fully re-laid-out diagram, where hiding the canvas and
- *  redrawing the whole thing reads as a reveal. An edit ("add one more
- *  step") only touches a corner of an existing diagram; resetting the whole
- *  canvas for that would undo the "keep everything else as it was" premise
- *  of an edit. Edits get their own, much smaller treatment below: a loading
- *  pill while the request is in flight, and a brief highlight on whatever
- *  the edit actually added once it lands. */
+/** AI operations whose result gets the full "pen is drawing this" rehearsal —
+ *  a brand-new or fully re-laid-out diagram, where hiding the canvas and
+ *  redrawing the whole thing reads as a reveal. An edit lands instantly
+ *  instead, with a quick cross-fade rather than a multi-second replay — see
+ *  the busy-transition effect below. */
 const REHEARSE_ON_BUSY = new Set(["generating", "laying-out"]);
 
 export function Canvas() {
@@ -45,11 +60,16 @@ export function Canvas() {
   const selection = useDiagram((s) => s.selection);
   const edgeSelection = useDiagram((s) => s.edgeSelection);
   const setEdgeSelection = useDiagram((s) => s.setEdgeSelection);
+  const undo = useDiagram((s) => s.undo);
+  const redo = useDiagram((s) => s.redo);
 
-  const { fitView, screenToFlowPosition, getNodes, getEdges } = useReactFlow<FlowNode, Edge>();
+  const { fitView, zoomIn, zoomOut, screenToFlowPosition, getNodes, getNodesBounds, getEdges } =
+    useReactFlow<FlowNode, Edge>();
   const transform = useStore((s) => s.transform);
   const selectedId = useDiagram((s) => s.selection.at(-1) ?? null);
-  const selectedNode = useStore((s) => (selectedId ? s.nodeLookup.get(selectedId) : null));
+  const selectedNode = useStore((s) =>
+    selectedId ? s.nodeLookup.get(selectedId) : null,
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -64,6 +84,14 @@ export function Canvas() {
 
   const syncing = useRef(false);
   const prevBusy = useRef<string | null>(null);
+  // Snapshot of the doc right as an AI-driven busy period (generate/layout/
+  // edit) starts, so completion can tell whether anything actually changed —
+  // a chat message that turns out to be a question rather than an edit
+  // instruction still cycles busy through "editing" and back to null with
+  // the doc untouched, and neither the rehearsal nor the edit cross-fade
+  // below should play for that.
+  const rehearseDocRef = useRef<DiagramDoc | null>(null);
+  const [editFade, setEditFade] = useState(false);
   const transformRef = useRef(transform);
   transformRef.current = transform;
   // Which node ids existed last sync — diffed against the new doc so a freshly
@@ -76,6 +104,64 @@ export function Canvas() {
   // (generate/layout/edit) re-frames the canvas. commit() sets this right
   // before its setDoc so the very next sync skips the fit.
   const skipNextFitView = useRef(false);
+
+  // Expose a content-bounds reader for image export. Export must capture every
+  // node/edge regardless of the on-screen pan/zoom, so the rasteriser asks the
+  // live React Flow store for the current bounding box instead of the DOM.
+  useEffect(() => {
+    registerExportRuntime({
+      getFlowBounds: () => {
+        const diagramNodes = getNodes().filter((n) => n.type === "diagram");
+        if (!diagramNodes.length) return null;
+        return getNodesBounds(diagramNodes);
+      },
+    });
+    return () => registerExportRuntime(null);
+  }, [getNodes, getNodesBounds]);
+
+  // Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z — the TopBar's undo/redo buttons already
+  // advertise these in their tooltips, but nothing actually listened for them.
+  // Deletion needs no matching wiring here: React Flow's own `deleteKeyCode`
+  // prop (set below) handles Backspace/Delete for whichever nodes/edges are
+  // selected, since selection already round-trips through the controlled
+  // nodes/edges state same as everything else.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "z" || !(event.metaKey || event.ctrlKey)) return;
+      const target = event.target as HTMLElement | null;
+      // Typing in a text field gets its own native undo — hijacking that into
+      // a diagram-level undo would revert the last diagram action instead of
+      // the character the user just typed.
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
+
+  // Viewport actions the copilot agent asked for ("zoom out a bit", "show me
+  // the whole thing"). They can't go through the store like undo/redo does —
+  // the viewport belongs to the React Flow instance, which only exists here.
+  useEffect(() => {
+    const onAction = (event: Event) => {
+      switch ((event as CustomEvent<string>).detail) {
+        case "fit_view":
+          void fitView({ padding: 0.18, duration: 320 });
+          return;
+        case "zoom_in":
+          void zoomIn({ duration: 220 });
+          return;
+        case "zoom_out":
+          void zoomOut({ duration: 220 });
+      }
+    };
+    window.addEventListener(CANVAS_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(CANVAS_ACTION_EVENT, onAction);
+  }, [fitView, zoomIn, zoomOut]);
 
   useEffect(() => {
     const flow = toFlow(doc);
@@ -102,7 +188,9 @@ export function Canvas() {
       const prevById = new Map(prevNodes.map((n) => [n.id, n]));
       return flow.nodes.map((n) => {
         const prev = prevById.get(n.id);
-        const merged = prev ? { ...n, measured: prev.measured, selected: prev.selected } : n;
+        const merged = prev
+          ? { ...n, measured: prev.measured, selected: prev.selected }
+          : n;
         return justAdded.has(n.id)
           ? { ...merged, data: { ...merged.data, justAdded: true } }
           : merged;
@@ -127,7 +215,8 @@ export function Canvas() {
       // reflect the pre-drag layout for a moment after a manual commit — the
       // data was never wrong, but re-fitting against that stale snapshot
       // visibly snaps the node you just dragged back toward where it was.
-      if (!skipFit && doc.nodes.length) void fitView({ padding: 0.16, duration: 350 });
+      if (!skipFit && doc.nodes.length)
+        void fitView({ padding: 0.16, duration: 350 });
     }, 60);
     return () => window.clearTimeout(id);
   }, [doc, setNodes, setEdges, fitView]);
@@ -138,28 +227,45 @@ export function Canvas() {
   // the fitView that lives there.
   useEffect(() => {
     if (edgeSelection.some((id) => !doc.edges.some((e) => e.id === id))) {
-      setEdgeSelection(edgeSelection.filter((id) => doc.edges.some((e) => e.id === id)));
+      setEdgeSelection(
+        edgeSelection.filter((id) => doc.edges.some((e) => e.id === id)),
+      );
     }
   }, [doc, edgeSelection, setEdgeSelection]);
 
-  // When an AI generation / layout / edit settles, replay the new diagram as a
-  // hand-drawn sketch: shapes render first, then the connectors trace between.
+  // When a generate/layout settles, replay the new diagram as a hand-drawn
+  // sketch. An edit lands on the canvas instantly instead — a full replay
+  // would redraw the whole diagram for what's often a one-line change — but
+  // still gets a quick cross-fade so the change doesn't read as an abrupt cut.
   useEffect(() => {
     const was = prevBusy.current;
     prevBusy.current = busy;
-    if (busy !== null || !was || !REHEARSE_ON_BUSY.has(was)) return;
-    const id = window.setTimeout(() => {
-      // Let React Flow finish swapping nodes + the fitView settle, then capture
-      // a stable snapshot so the strokes land exactly on the diagram.
-      const current = useDiagram.getState().doc;
-      if (current.nodes.length < 2) return;
-      setRehearsal({
-        key: Date.now(),
-        doc: current,
-        transform: transformRef.current,
-      });
-    }, 560);
-    return () => window.clearTimeout(id);
+
+    if (busy !== null && was === null && (REHEARSE_ON_BUSY.has(busy) || busy === "editing")) {
+      rehearseDocRef.current = useDiagram.getState().doc;
+    }
+    if (busy !== null || !was) return;
+
+    if (REHEARSE_ON_BUSY.has(was)) {
+      const id = window.setTimeout(() => {
+        // Let React Flow finish swapping nodes + the fitView settle, then
+        // capture a stable snapshot so the strokes land exactly on the diagram.
+        const current = useDiagram.getState().doc;
+        if (current.nodes.length < 2 || current === rehearseDocRef.current) return;
+        setRehearsal({
+          key: Date.now(),
+          doc: current,
+          transform: transformRef.current,
+        });
+      }, 560);
+      return () => window.clearTimeout(id);
+    }
+
+    if (was === "editing" && useDiagram.getState().doc !== rehearseDocRef.current) {
+      setEditFade(true);
+      const id = window.setTimeout(() => setEditFade(false), 220);
+      return () => window.clearTimeout(id);
+    }
   }, [busy]);
 
   // Read through getNodes()/getEdges() (xyflow's own internal store), not the
@@ -171,25 +277,87 @@ export function Canvas() {
   const commit = useCallback(() => {
     if (syncing.current) return;
     skipNextFitView.current = true;
-    setDoc(fromFlow(useDiagram.getState().doc, getNodes(), getEdges()), { silent: true });
+    setDoc(fromFlow(useDiagram.getState().doc, getNodes(), getEdges()), {
+      silent: true,
+    });
   }, [setDoc, getNodes, getEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      const id = `e_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       setEdges((current) =>
-        addEdge(
-          { ...connection, id: `e_${Date.now().toString(36)}`, type: "smoothstep" },
-          current,
-        ),
+        addEdge({ ...connection, id, type: "smoothstep" }, current),
       );
+      // Persist to the doc immediately — unlike node drags there's no later
+      // commit() event here, so without this the edge lives only in React
+      // Flow's local state and silently vanishes on the next doc sync
+      // (undo/redo, autosave, an AI edit, or a reload).
+      const currentDoc = useDiagram.getState().doc;
+      setDoc({
+        ...currentDoc,
+        edges: [
+          ...currentDoc.edges,
+          {
+            id,
+            source: connection.source,
+            target: connection.target,
+            source_handle: connection.sourceHandle ?? null,
+            target_handle: connection.targetHandle ?? null,
+            label: null,
+            style: "solid",
+            condition: null,
+            bidirectional: false,
+            start_arrow: null,
+            end_arrow: null,
+            curve: "smoothstep",
+            color: null,
+            width: null,
+          },
+        ],
+      });
       if (tool === "connector") setTool("select");
     },
-    [setEdges, tool],
+    [setEdges, tool, setDoc],
+  );
+
+  // Drag an existing connector's end onto a different node/port to
+  // re-target it. Same reason as onConnect above for editing the doc by
+  // hand instead of calling commit(): getEdges() reads React Flow's own
+  // store, which a setEdges() call earlier in this same tick hasn't
+  // reached yet, so reading it back immediately would still see the old
+  // endpoint — updating the matching doc edge directly is what actually
+  // lands the change, and it keeps every other field (colour, style,
+  // arrows, label) untouched.
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      setEdges((current) => reconnectEdge(oldEdge, newConnection, current));
+      const currentDoc = useDiagram.getState().doc;
+      setDoc({
+        ...currentDoc,
+        edges: currentDoc.edges.map((e) =>
+          e.id === oldEdge.id
+            ? {
+                ...e,
+                source: newConnection.source,
+                target: newConnection.target,
+                source_handle: newConnection.sourceHandle ?? null,
+                target_handle: newConnection.targetHandle ?? null,
+              }
+            : e,
+        ),
+      });
+    },
+    [setEdges, setDoc],
   );
 
   const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams) => {
-      setSelection(selectedNodes.filter((n) => n.type === "diagram").map((n) => n.id));
+    ({
+      nodes: selectedNodes,
+      edges: selectedEdges,
+    }: OnSelectionChangeParams) => {
+      setSelection(
+        selectedNodes.filter((n) => n.type === "diagram").map((n) => n.id),
+      );
       setEdgeSelection(selectedEdges.map((e) => e.id));
     },
     [setSelection, setEdgeSelection],
@@ -210,7 +378,13 @@ export function Canvas() {
   const imageDropPoint = useRef<{ x: number; y: number } | null>(null);
 
   const onPaneClick = (event: React.MouseEvent) => {
-    if (tool === "select" || tool === "hand" || tool === "connector" || tool === "group") return;
+    if (
+      tool === "select" ||
+      tool === "hand" ||
+      tool === "connector" ||
+      tool === "group"
+    )
+      return;
     const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
 
     if (tool === "image") {
@@ -219,7 +393,9 @@ export function Canvas() {
       return;
     }
 
-    const PLACEMENT: Partial<Record<Tool, { kind: NodeKind; label: string; textOnly?: boolean }>> = {
+    const PLACEMENT: Partial<
+      Record<Tool, { kind: NodeKind; label: string; textOnly?: boolean }>
+    > = {
       node: { kind: "process", label: "Process" },
       text: { kind: "note", label: "Text", textOnly: true },
       shape: { kind: "decision", label: "Decision" },
@@ -259,9 +435,27 @@ export function Canvas() {
   const onCanvasDrop = (event: React.DragEvent) => {
     event.preventDefault();
     setDropActive(false);
-    const kind = event.dataTransfer.getData("application/copilot-asset") as NodeKind | "";
-    if (!kind) return;
     const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+
+    const iconKey = event.dataTransfer.getData("application/copilot-icon");
+    if (iconKey) {
+      const asset = ICON_CATALOG.find((a) => a.key === iconKey);
+      if (!asset) return;
+      insertAt({
+        id: `img_${Date.now().toString(36)}`,
+        label: asset.label,
+        kind: "note",
+        position: point,
+        imageUrl: iconToDataUrl(asset.Icon),
+        size: { width: 56, height: 56 },
+      });
+      return;
+    }
+
+    const kind = event.dataTransfer.getData("application/copilot-asset") as
+      | NodeKind
+      | "";
+    if (!kind) return;
     const labels: Partial<Record<NodeKind, string>> = {
       actor: "User",
       service: "Server",
@@ -282,9 +476,10 @@ export function Canvas() {
 
   /* ------------------------------------------------ selected-node actions */
 
-  const selNodeIds = () => selection.filter((id) =>
-    useDiagram.getState().doc.nodes.some((n) => n.id === id),
-  );
+  const selNodeIds = () =>
+    selection.filter((id) =>
+      useDiagram.getState().doc.nodes.some((n) => n.id === id),
+    );
 
   const duplicateSelected = () => {
     const current = useDiagram.getState().doc;
@@ -313,7 +508,9 @@ export function Canvas() {
     setDoc({
       ...current,
       nodes: current.nodes.filter((n) => !ids.includes(n.id)),
-      edges: current.edges.filter((e) => !ids.includes(e.source) && !ids.includes(e.target)),
+      edges: current.edges.filter(
+        (e) => !ids.includes(e.source) && !ids.includes(e.target),
+      ),
     });
     setSelection([]);
     setEdgeSelection([]);
@@ -322,7 +519,9 @@ export function Canvas() {
   /* ------------------------------------------------ selected-edge actions */
 
   const selEdgeIds = () =>
-    edgeSelection.filter((id) => useDiagram.getState().doc.edges.some((e) => e.id === id));
+    edgeSelection.filter((id) =>
+      useDiagram.getState().doc.edges.some((e) => e.id === id),
+    );
 
   const patchSelectedEdges = (patch: Partial<DiagramEdge>) => {
     const current = useDiagram.getState().doc;
@@ -330,20 +529,39 @@ export function Canvas() {
     if (!ids.length) return;
     setDoc({
       ...current,
-      edges: current.edges.map((e) => (ids.includes(e.id) ? { ...e, ...patch } : e)),
+      edges: current.edges.map((e) =>
+        ids.includes(e.id) ? { ...e, ...patch } : e,
+      ),
     });
   };
 
-  const setSelectedEdgeCurve = (curve: EdgeCurve) => patchSelectedEdges({ curve });
-  const setSelectedEdgeColor = (color: string | null) => patchSelectedEdges({ color });
-  const setSelectedEdgeLineStyle = (style: EdgeStyle) => patchSelectedEdges({ style });
-  const setSelectedEdgeWidth = (width: number | null) => patchSelectedEdges({ width });
+  const setSelectedEdgeCurve = (curve: EdgeCurve) =>
+    patchSelectedEdges({ curve });
+  const setSelectedEdgeColor = (color: string | null) =>
+    patchSelectedEdges({ color });
+  const setSelectedEdgeLineStyle = (style: EdgeStyle) =>
+    patchSelectedEdges({ style });
+  const setSelectedEdgeStartArrow = (start_arrow: EdgeArrow) =>
+    patchSelectedEdges({ start_arrow });
+  const setSelectedEdgeEndArrow = (end_arrow: EdgeArrow) =>
+    patchSelectedEdges({ end_arrow });
+  const setSelectedEdgeWidth = (width: number | null) =>
+    patchSelectedEdges({ width });
+  const setSelectedEdgeLabel = (label: string) =>
+    patchSelectedEdges({ label: label || null });
+  const setSelectedEdgeLabelColor = (label_color: string | null) =>
+    patchSelectedEdges({ label_color });
+  const setSelectedEdgeLabelFontSize = (label_font_size: number | null) =>
+    patchSelectedEdges({ label_font_size });
 
   const deleteSelectedEdges = () => {
     const current = useDiagram.getState().doc;
     const ids = selEdgeIds();
     if (!ids.length) return;
-    setDoc({ ...current, edges: current.edges.filter((e) => !ids.includes(e.id)) });
+    setDoc({
+      ...current,
+      edges: current.edges.filter((e) => !ids.includes(e.id)),
+    });
     setEdgeSelection([]);
   };
 
@@ -353,7 +571,9 @@ export function Canvas() {
     if (!ids.length) return;
     setDoc({
       ...current,
-      nodes: current.nodes.map((n) => (ids.includes(n.id) ? { ...n, kind } : n)),
+      nodes: current.nodes.map((n) =>
+        ids.includes(n.id) ? { ...n, kind } : n,
+      ),
     });
   };
 
@@ -373,6 +593,54 @@ export function Canvas() {
     });
   };
 
+  const setSelectedLineStyle = (borderStyle: "solid" | "dashed" | "dotted") => {
+    const current = useDiagram.getState().doc;
+    const ids = selNodeIds();
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const style = { ...(n.style ?? {}) };
+        if (borderStyle === "solid") delete style.borderStyle;
+        else style.borderStyle = borderStyle;
+        return { ...n, style };
+      }),
+    });
+  };
+
+  const setSelectedOpacity = (opacity: number) => {
+    const current = useDiagram.getState().doc;
+    const ids = selNodeIds();
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const style = { ...(n.style ?? {}) };
+        if (opacity >= 1) delete style.opacity;
+        else style.opacity = opacity;
+        return { ...n, style };
+      }),
+    });
+  };
+
+  const setSelectedFontSize = (fontSize: number | null) => {
+    const current = useDiagram.getState().doc;
+    const ids = selNodeIds();
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const style = { ...(n.style ?? {}) };
+        if (fontSize === null) delete style.fontSize;
+        else style.fontSize = fontSize;
+        return { ...n, style };
+      }),
+    });
+  };
+
   /** Group (or, on a second click, ungroup) the current multi-selection.
    *  Purely visual: a shared `style.groupId` drives the dashed box below and
    *  lets members drag together — no schema change, nothing the backend or
@@ -383,9 +651,14 @@ export function Canvas() {
     if (ids.length < 2) return;
 
     const targets = current.nodes.filter((n) => ids.includes(n.id));
-    const groupIds = new Set(targets.map((n) => n.style?.groupId).filter(Boolean));
-    const alreadyOneGroup = groupIds.size === 1 && targets.every((n) => n.style?.groupId);
-    const nextGroupId = alreadyOneGroup ? null : `grp_${Date.now().toString(36)}`;
+    const groupIds = new Set(
+      targets.map((n) => n.style?.groupId).filter(Boolean),
+    );
+    const alreadyOneGroup =
+      groupIds.size === 1 && targets.every((n) => n.style?.groupId);
+    const nextGroupId = alreadyOneGroup
+      ? null
+      : `grp_${Date.now().toString(36)}`;
 
     setDoc({
       ...current,
@@ -479,7 +752,10 @@ export function Canvas() {
    *  derived from the same `nodes` state React Flow is already rendering, so
    *  a box tracks a drag in real time instead of only snapping after commit. */
   const groupBoxes = (() => {
-    const bounds = new Map<string, { x1: number; y1: number; x2: number; y2: number }>();
+    const bounds = new Map<
+      string,
+      { x1: number; y1: number; x2: number; y2: number }
+    >();
     for (const n of nodes) {
       const groupId = n.data.style?.groupId;
       if (typeof groupId !== "string") continue;
@@ -493,7 +769,12 @@ export function Canvas() {
       bounds.set(
         groupId,
         b
-          ? { x1: Math.min(b.x1, x1), y1: Math.min(b.y1, y1), x2: Math.max(b.x2, x2), y2: Math.max(b.y2, y2) }
+          ? {
+              x1: Math.min(b.x1, x1),
+              y1: Math.min(b.y1, y1),
+              x2: Math.max(b.x2, x2),
+              y2: Math.max(b.y2, y2),
+            }
           : { x1, y1, x2, y2 },
       );
     }
@@ -507,6 +788,19 @@ export function Canvas() {
     }));
   })();
 
+  /** The fitted "page" the flow was laid out to (slide / A4 / …), mapped into
+   *  live screen space so the dashed frame tracks pan/zoom like the nodes. */
+  const pageRect = (() => {
+    const rect = pageRectFromMeta(doc.meta);
+    if (!rect) return null;
+    return {
+      left: rect.x * transform[2] + transform[0],
+      top: rect.y * transform[2] + transform[1],
+      width: rect.width * transform[2],
+      height: rect.height * transform[2],
+    };
+  })();
+
   const editSelected = () => {
     const current = useDiagram.getState().doc;
     const labels = current.nodes
@@ -514,22 +808,11 @@ export function Canvas() {
       .map((n) => n.label);
     if (!labels.length) return;
     window.dispatchEvent(
-      new CustomEvent("copilot:focus", { detail: `Improve the selected node "${labels[0]}": ` }),
+      new CustomEvent("copilot:focus", {
+        detail: `Improve the selected node "${labels[0]}": `,
+      }),
     );
   };
-
-  /* -------------------------------------------------- selection toolbar pos */
-
-  const marker =
-    selectedNode?.measured
-      ? {
-          x:
-            selectedNode.position.x * transform[2] +
-            transform[0] +
-            ((selectedNode.measured.width ?? 0) / 2) * transform[2],
-          y: selectedNode.position.y * transform[2] + transform[1],
-        }
-      : null;
 
   const selData = selectedNode?.data as FlowNodeData | undefined;
 
@@ -537,17 +820,25 @@ export function Canvas() {
   // exist in the doc. Position follows the midpoint between the two connected
   // nodes' centres (available without reading React Flow's internal stores).
   const selEdgeId = edgeSelection.at(-1) ?? null;
-  const selEdge = selEdgeId ? doc.edges.find((e) => e.id === selEdgeId) ?? null : null;
-  const sourceNode = selEdge ? doc.nodes.find((n) => n.id === selEdge.source) : null;
-  const targetNode = selEdge ? doc.nodes.find((n) => n.id === selEdge.target) : null;
+  const selEdge = selEdgeId
+    ? (doc.edges.find((e) => e.id === selEdgeId) ?? null)
+    : null;
+  const sourceNode = selEdge
+    ? doc.nodes.find((n) => n.id === selEdge.source)
+    : null;
+  const targetNode = selEdge
+    ? doc.nodes.find((n) => n.id === selEdge.target)
+    : null;
   const edgeMarker =
     !selectedNode && selEdge && sourceNode && targetNode
       ? (() => {
           const mx =
-            sourceNode.position.x + sourceNode.size.width / 2 +
+            sourceNode.position.x +
+            sourceNode.size.width / 2 +
             (targetNode.position.x + targetNode.size.width / 2);
           const my =
-            sourceNode.position.y + sourceNode.size.height / 2 +
+            sourceNode.position.y +
+            sourceNode.size.height / 2 +
             (targetNode.position.y + targetNode.size.height / 2);
           return {
             x: (mx / 2) * transform[2] + transform[0],
@@ -566,6 +857,7 @@ export function Canvas() {
       // frame, so the "sketch" reads as a redundant scribble drawn on top of
       // a diagram that's visibly already there, not a reveal.
       data-rehearsing={rehearsal ? "true" : undefined}
+      data-edit-fade={editFade ? "true" : undefined}
       onDragOver={(event) => {
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
@@ -576,6 +868,61 @@ export function Canvas() {
       }}
       onDrop={onCanvasDrop}
     >
+      {/* Circle/diamond connector end markers — not in React Flow's built-in
+          MarkerType, so hand-rolled here and referenced by edges as
+          url(#edge-marker-…). Defined once; `context-stroke` (with a static
+          fallback for browsers that don't support it yet) keeps each marker
+          the same colour as the line it terminates, matching every other
+          connector end without tracking per-edge marker colours ourselves. */}
+      <svg width={0} height={0} style={{ position: "absolute" }} aria-hidden="true">
+        <defs>
+          <marker
+            id="edge-marker-circle"
+            viewBox="-10 -10 20 20"
+            refX="0"
+            refY="0"
+            markerWidth={16}
+            markerHeight={16}
+            markerUnits="userSpaceOnUse"
+            orient="auto-start-reverse"
+          >
+            <circle cx="-4" cy="0" r="4" fill="#94a3b8" style={{ fill: "context-stroke" }} />
+          </marker>
+          <marker
+            id="edge-marker-diamond"
+            viewBox="-10 -10 20 20"
+            refX="0"
+            refY="0"
+            markerWidth={16}
+            markerHeight={16}
+            markerUnits="userSpaceOnUse"
+            orient="auto-start-reverse"
+          >
+            <path d="M -8 0 L -4 -4.5 L 0 0 L -4 4.5 Z" fill="#94a3b8" style={{ fill: "context-stroke" }} />
+          </marker>
+        </defs>
+      </svg>
+
+      {/* Fitted-page frame (slide / A4 / …): a soft page outline behind nodes
+          so the user sees exactly what the export will crop to. */}
+      {pageRect && (
+        <div className="pointer-events-none absolute inset-0">
+          <div
+            style={{
+              position: "absolute",
+              left: pageRect.left,
+              top: pageRect.top,
+              width: pageRect.width,
+              height: pageRect.height,
+              border: "1px solid var(--line-strong)",
+              borderRadius: 6,
+              boxShadow:
+                "inset 0 0 0 9999px color-mix(in srgb, var(--paper) 55%, transparent)",
+            }}
+          />
+        </div>
+      )}
+
       {/* Group boundaries paint before the canvas so they sit visually behind
           every node; purely decorative, hence pointer-events: none. */}
       {groupBoxes.length > 0 && (
@@ -608,15 +955,18 @@ export function Canvas() {
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStopWithGroup}
-        onEdgesDelete={() => {
-          commit();
-          setEdgeSelection([]);
-        }}
-        onNodesDelete={() => {
-          commit();
-          setEdgeSelection([]);
-        }}
+        // Not commit(): React Flow calls onNodesDelete/onEdgesDelete *before*
+        // actually applying the removal to its own store, so a commit() here
+        // would read getNodes()/getEdges() a beat too early, still including
+        // the node/edge that's about to disappear — that stale snapshot then
+        // round-trips back through the doc-sync effect and undoes the
+        // deletion. Reusing the toolbar's own delete-by-current-selection
+        // logic sidesteps the timing entirely.
+        onEdgesDelete={deleteSelectedEdges}
+        onNodesDelete={deleteSelected}
         onConnect={onConnect}
+        onReconnect={onReconnect}
+        edgesReconnectable={tool === "select"}
         onSelectionChange={onSelectionChange}
         onPaneClick={onPaneClick}
         nodesDraggable={tool === "select"}
@@ -644,7 +994,17 @@ export function Canvas() {
             style={{ background: "var(--paper)" }}
           />
         )}
-        {prefs.minimap && <MiniMap pannable zoomable nodeStrokeWidth={2} />}
+        {/* bottom-left, not the RF default bottom-right — the new right-docked
+            StylePanel spans the full canvas height whenever a node is
+            selected, and would sit right on top of a bottom-right minimap. */}
+        {prefs.minimap && (
+          <MiniMap
+            position="bottom-left"
+            pannable
+            zoomable
+            nodeStrokeWidth={2}
+          />
+        )}
       </ReactFlow>
 
       <input
@@ -689,18 +1049,40 @@ export function Canvas() {
         </div>
       )}
 
-      {marker && tool === "select" && (
-        <SelectionToolbar
-          x={marker.x}
-          y={marker.y}
+      {selectedNode && tool === "select" && (
+        <StylePanel
           shape={selData?.kind ?? "process"}
-          color={typeof selData?.style?.color === "string" ? selData.style.color : null}
+          color={
+            typeof selData?.style?.color === "string"
+              ? selData.style.color
+              : null
+          }
+          lineStyle={
+            selData?.style?.borderStyle === "dashed" ||
+            selData?.style?.borderStyle === "dotted"
+              ? selData.style.borderStyle
+              : "solid"
+          }
+          opacity={
+            typeof selData?.style?.opacity === "number"
+              ? selData.style.opacity
+              : 1
+          }
+          fontSize={
+            typeof selData?.style?.fontSize === "number"
+              ? selData.style.fontSize
+              : null
+          }
           onEdit={editSelected}
           onDuplicate={duplicateSelected}
           onConnect={() => setTool("connector")}
           onDelete={deleteSelected}
+          onClose={() => setSelection([])}
           onSetShape={setSelectedShape}
           onSetColor={setSelectedColor}
+          onSetLineStyle={setSelectedLineStyle}
+          onSetOpacity={setSelectedOpacity}
+          onSetFontSize={setSelectedFontSize}
         />
       )}
 
@@ -712,11 +1094,21 @@ export function Canvas() {
           color={selEdge.color ?? null}
           lineStyle={selEdge.style ?? "solid"}
           width={selEdge.width ?? null}
+          startArrow={selEdge.start_arrow ?? (selEdge.bidirectional ? "triangle" : "none")}
+          endArrow={selEdge.end_arrow ?? "triangle"}
+          label={selEdge.label ?? ""}
+          labelColor={selEdge.label_color ?? null}
+          labelFontSize={selEdge.label_font_size ?? null}
           onDelete={deleteSelectedEdges}
           onSetCurve={setSelectedEdgeCurve}
           onSetColor={setSelectedEdgeColor}
           onSetStyle={setSelectedEdgeLineStyle}
           onSetWidth={setSelectedEdgeWidth}
+          onSetStartArrow={setSelectedEdgeStartArrow}
+          onSetEndArrow={setSelectedEdgeEndArrow}
+          onSetLabel={setSelectedEdgeLabel}
+          onSetLabelColor={setSelectedEdgeLabelColor}
+          onSetLabelFontSize={setSelectedEdgeLabelFontSize}
         />
       )}
     </div>

@@ -8,8 +8,9 @@ Create Date: 2026-01-01 00:00:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -24,8 +25,12 @@ def upgrade() -> None:
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("description", sa.Text()),
         sa.Column("color", sa.String(20), server_default="#5B4BE0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
 
     op.create_table(
@@ -45,8 +50,12 @@ def upgrade() -> None:
         sa.Column("tags", postgresql.JSONB(astext_type=sa.Text()), server_default="[]"),
         sa.Column("is_favorite", sa.Boolean(), server_default=sa.false()),
         sa.Column("current_version", sa.Integer(), server_default="1"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index("ix_diagrams_project_id", "diagrams", ["project_id"])
 
@@ -63,8 +72,12 @@ def upgrade() -> None:
         sa.Column("label", sa.String(200)),
         sa.Column("origin", sa.String(30), server_default="manual"),
         sa.Column("data", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index(
         "ix_diagram_versions_diagram_version",
@@ -85,8 +98,12 @@ def upgrade() -> None:
         sa.Column("data", postgresql.JSONB(astext_type=sa.Text()), server_default="{}"),
         sa.Column("is_builtin", sa.Boolean(), server_default=sa.true()),
         sa.Column("use_count", sa.Integer(), server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index("ix_templates_category", "templates", ["category"])
 
@@ -107,8 +124,12 @@ def upgrade() -> None:
         sa.Column("latency_ms", sa.Integer(), server_default="0"),
         sa.Column("ok", sa.Boolean(), server_default=sa.true()),
         sa.Column("error", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
     )
     op.create_index("ix_ai_runs_diagram_id", "ai_runs", ["diagram_id"])
 

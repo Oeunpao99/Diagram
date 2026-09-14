@@ -13,7 +13,7 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to="/templates" replace />;
 
   // Checked here as well as server-side so the failure is immediate.
   const tooShort = password.length > 0 && password.length < MIN_PASSWORD;
@@ -21,7 +21,7 @@ export default function Register() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (tooShort) return;
-    if (await register(email.trim(), name.trim(), password)) navigate("/", { replace: true });
+    if (await register(email.trim(), name.trim(), password)) navigate("/templates", { replace: true });
   }
 
   return (

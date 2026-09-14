@@ -15,10 +15,13 @@ export type NodeKind =
   | "cloud"
   | "note";
 
-export type EdgeStyle = "solid" | "dashed" | "dotted" | "animated";
+export type EdgeStyle = "solid" | "dashed" | "dotted" | "dashdot" | "longdash" | "animated";
 
 /** Connector routing used by React Flow when drawing a link line. */
 export type EdgeCurve = "smoothstep" | "step" | "bezier" | "straight";
+
+/** Marker drawn at one end of a connector. */
+export type EdgeArrow = "none" | "arrow" | "triangle" | "circle" | "diamond";
 export type Direction = "LR" | "RL" | "TB" | "BT";
 
 export type DiagramType =
@@ -50,16 +53,29 @@ export interface DiagramEdge {
   id: string;
   source: string;
   target: string;
+  /** React Flow handle id the link leaves from; null = default (Right port). */
+  source_handle?: string | null;
+  /** React Flow handle id the link lands on; null = default (Left port). */
+  target_handle?: string | null;
   label?: string | null;
   style: EdgeStyle;
   condition?: string | null;
+  /** @deprecated superseded by start_arrow/end_arrow; kept for older saved diagrams. */
   bidirectional?: boolean;
+  /** Marker at the source end; null/undefined defers to `bidirectional`. */
+  start_arrow?: EdgeArrow | null;
+  /** Marker at the target end; null/undefined defaults to a filled triangle. */
+  end_arrow?: EdgeArrow | null;
   /** Connector shape; undefined keeps the default smoothstep routing. */
   curve?: EdgeCurve | null;
   /** Stroke colour, a hex string; undefined/null keeps the theme default. */
   color?: string | null;
   /** Stroke width in pixels; undefined/null keeps the 1.5 default. */
   width?: number | null;
+  /** Label text colour, a hex string; undefined/null keeps the theme default. */
+  label_color?: string | null;
+  /** Label text size in pixels; undefined/null keeps the 10px default. */
+  label_font_size?: number | null;
 }
 
 export interface Lane {
@@ -119,6 +135,37 @@ export interface EditResult {
   validation: ValidationReport;
 }
 
+export interface RouteResult {
+  intent: "modify" | "ask";
+  answer: string | null;
+}
+
+/** Actions the agent hands back for the browser to run — the ones that live
+ *  in the canvas rather than the document. Document-level tools are applied
+ *  server-side and arrive as an updated `doc`. */
+export type ClientActionTool = "undo" | "redo" | "fit_view" | "zoom_in" | "zoom_out" | "select";
+
+export interface AgentAction {
+  tool: ClientActionTool;
+  args: { ids?: string[] };
+}
+
+export interface AgentResult {
+  /** "ask" answers in chat; "act" applied tool calls; "rewrite" went through
+   *  the whole-document edit agent. */
+  intent: "ask" | "act" | "rewrite";
+  answer: string | null;
+  /** Null when nothing about the document changed (a question, or an action
+   *  that only touched the canvas). */
+  doc: DiagramDoc | null;
+  changes: string[];
+  /** Steps the agent wanted but couldn't take. Shown to the user so a
+   *  half-applied instruction doesn't read as a complete one. */
+  warnings: string[];
+  client_actions: AgentAction[];
+  validation: ValidationReport | null;
+}
+
 export interface Template {
   id: string;
   name: string;
@@ -159,9 +206,15 @@ export function normalizeDoc(raw: Partial<DiagramDoc>): DiagramDoc {
       style: edge.style ?? "solid",
       condition: edge.condition ?? null,
       bidirectional: edge.bidirectional ?? false,
+      start_arrow: edge.start_arrow ?? null,
+      end_arrow: edge.end_arrow ?? null,
+      source_handle: edge.source_handle ?? null,
+      target_handle: edge.target_handle ?? null,
       curve: edge.curve ?? null,
       color: edge.color ?? null,
       width: edge.width ?? null,
+      label_color: edge.label_color ?? null,
+      label_font_size: edge.label_font_size ?? null,
     })),
     nodes: (raw.nodes ?? []).map((node) => ({
       ...node,
@@ -204,7 +257,18 @@ export interface DiagramListItem {
   title: string;
   diagram_type: string;
   is_favorite: boolean;
+  project_id: string | null;
   updated_at: string;
+}
+
+/** A folder of related diagrams. */
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string;
+  diagram_count: number;
+  created_at: string;
 }
 
 /** Full record from GET/POST/PATCH /diagrams. `data` is the stored doc. */

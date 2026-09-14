@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
+import { api } from "../api/client";
 import { useAuth } from "../store/useAuth";
-import { useSettings } from "../store/useSettings";
 import { useDiagram } from "../store/useDiagram";
 import { ExportMenu } from "./ExportMenu";
+import { ImportMenu } from "./ImportMenu";
 import {
   ChevronDown,
+  Grid,
   LogoMark,
   MessageSquare,
   Redo,
@@ -15,16 +17,15 @@ import {
   Undo,
 } from "./icons";
 
-function initials(name: string) {
+export function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-function AccountMenu() {
+export function AccountMenu() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
-  const openSettings = useSettings((s) => s.openSettings);
   const navigate = useNavigate();
 
   if (!user) return null;
@@ -43,7 +44,7 @@ function AccountMenu() {
       </div>
       <button
         className="flex w-full items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-left text-[12.5px] text-ink hover:bg-surface-2 [&_svg]:size-[15px] [&_svg]:text-slate"
-        onClick={() => openSettings("profile")}
+        onClick={() => navigate("/settings")}
       >
         Settings
       </button>
@@ -109,7 +110,30 @@ export function TopBar() {
   const future = useDiagram((s) => s.future);
   const undo = useDiagram((s) => s.undo);
   const redo = useDiagram((s) => s.redo);
+  const projectId = useDiagram((s) => s.projectId);
+  const navigate = useNavigate();
   const [link, setLink] = useState("https://app.diagramcopilot.app/import-cargo-process");
+  const [projectName, setProjectName] = useState<string | null>(null);
+
+  // There's no GET /projects/{id} — the list is cheap (a user's own
+  // projects), so finding the one we need there is simpler than a dedicated
+  // endpoint just for this label.
+  useEffect(() => {
+    if (!projectId) {
+      setProjectName(null);
+      return;
+    }
+    let alive = true;
+    api
+      .listProjects()
+      .then((projects) => {
+        if (alive) setProjectName(projects.find((p) => p.id === projectId)?.name ?? null);
+      })
+      .catch(() => alive && setProjectName(null));
+    return () => {
+      alive = false;
+    };
+  }, [projectId]);
 
   const copyLink = async () => {
     try {
@@ -132,12 +156,21 @@ export function TopBar() {
             <LogoMark />
           </span>
           <span className="flex items-center gap-[3px] text-[13.5px] font-[650] tracking-[-0.01em]">
-            Diagram Copilot
+            Kumnous-គំនូស
             <span className="ml-1.5 border-l border-line pl-2 text-[11px] font-[450] text-slate-soft">
               editable diagrams
             </span>
           </span>
         </span>
+
+        <button
+          className="inline-flex shrink-0 items-center gap-[7px] whitespace-nowrap rounded-[7px] border-none bg-transparent px-2 py-1.5 text-[12.5px] font-[550] text-slate transition-colors hover:bg-surface-2 hover:text-ink [&_svg]:size-4"
+          onClick={() => navigate("/templates")}
+          title="Back to the Template Library"
+        >
+          <Grid />
+          Templates
+        </button>
 
         <span className="h-5 w-px bg-line" />
 
@@ -164,17 +197,20 @@ export function TopBar() {
         </span>
       </div>
 
-      <div className="ml-3 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-slate-soft max-[1240px]:hidden">
-        <a className="text-slate hover:text-green-deep" href="#projects">
-          Projects
-        </a>
-        <span className="text-line-strong">/</span>
-        <a className="text-slate hover:text-green-deep" href="#logistics">
-          Logistics
-        </a>
-        <span className="text-line-strong">/</span>
-        <span className="font-[550] text-ink">Import Cargo Process</span>
-      </div>
+      {/* Only shown once the open diagram actually belongs to a project —
+          the title input just left of this already names the diagram, so
+          there's nothing worth adding here otherwise. */}
+      {projectId && projectName && (
+        <div className="ml-3 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-slate-soft max-[1240px]:hidden">
+          <Link className="text-slate hover:text-green-deep" to="/projects">
+            Projects
+          </Link>
+          <span className="text-line-strong">/</span>
+          <Link className="font-[550] text-ink hover:text-green-deep" to={`/projects/${projectId}`}>
+            {projectName}
+          </Link>
+        </div>
+      )}
 
       <div className="ml-auto flex items-center gap-1">
         <button
@@ -232,6 +268,7 @@ export function TopBar() {
           </div>
         </InlineMenu>
 
+        <ImportMenu />
         <ExportMenu doc={doc} />
         <span className="h-5 w-px bg-line" />
 
@@ -241,7 +278,7 @@ export function TopBar() {
           disabled={busy !== null}
         >
           <Sparkles />
-          AI Copilot
+          Kumnous AI
         </button>
 
         <AccountMenu />

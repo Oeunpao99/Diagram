@@ -2,6 +2,8 @@ import { useReactFlow, useStore } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import { useDiagram } from "../store/useDiagram";
+import { DirectionMenu } from "./DirectionMenu";
+import { PageMenu } from "./PageMenu";
 import {
   BoxIcon,
   GitBranch,
@@ -86,6 +88,8 @@ export function CanvasToolbar({
             Re-arrange automatically
           </span>
         </button>
+        <DirectionMenu />
+        <PageMenu />
         <span className="mx-1 my-[3px] w-px self-stretch bg-line" />
         <div className="inline-flex items-center gap-px text-slate">
           <button

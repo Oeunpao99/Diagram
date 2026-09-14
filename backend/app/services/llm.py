@@ -79,6 +79,7 @@ async def complete(
     model: str | None = None,
     max_tokens: int = 8000,
     expect_json: bool = True,
+    image_data_url: str | None = None,
 ) -> LLMResult:
     """One chat completion.
 
@@ -86,14 +87,26 @@ async def complete(
     and reject anything but the default. `max_tokens` maps to
     max_completion_tokens, which reasoning tokens also draw from — so keep it
     generous or the visible answer comes back empty.
+
+    `image_data_url` sends a "data:image/...;base64,..." string alongside the
+    text — the chat completions vision format, an array of typed parts
+    instead of a plain string. Pass a vision-capable deployment as `model`;
+    Azure doesn't reject a non-vision one client-side, it just fails at call
+    time, and confusingly.
     """
     started = time.perf_counter()
+    user_content: str | list[dict[str, Any]] = user
+    if image_data_url:
+        user_content = [
+            {"type": "text", "text": user},
+            {"type": "image_url", "image_url": {"url": image_data_url}},
+        ]
     kwargs: dict[str, Any] = {
         "model": model or settings.azure_openai_deployment,
         "max_completion_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": user_content},
         ],
     }
     if expect_json:

@@ -12,9 +12,12 @@ export default function Login() {
   const [password, setPassword] = useState("");
 
   // Bounce straight through if a session is already live.
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to="/templates" replace />;
 
-  const from = (location.state as { from?: string } | null)?.from ?? "/";
+  // "from" only exists when a protected route redirected here — go back to
+  // whatever the user was actually trying to reach. Otherwise (following a
+  // plain login link) land on the dashboard, not straight into the editor.
+  const from = (location.state as { from?: string } | null)?.from ?? "/templates";
 
   async function submit(event: FormEvent) {
     event.preventDefault();

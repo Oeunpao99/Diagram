@@ -25,6 +25,10 @@ class Project(Base, UUIDMixin, TimestampMixin):
         back_populates="project", cascade="all, delete-orphan", lazy="selectin"
     )
 
+    @property
+    def diagram_count(self) -> int:
+        return len(self.diagrams)
+
 
 class Diagram(Base, UUIDMixin, TimestampMixin):
     """The live document. `data` holds the canonical diagram JSON."""

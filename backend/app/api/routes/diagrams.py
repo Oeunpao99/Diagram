@@ -27,14 +27,8 @@ router = APIRouter(tags=["diagrams"])
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-async def list_projects(
-    user: User = Depends(current_user), db: AsyncSession = Depends(get_db)
-):
-    stmt = (
-        select(Project)
-        .where(Project.owner_id == user.id)
-        .order_by(Project.created_at.desc())
-    )
+async def list_projects(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    stmt = select(Project).where(Project.owner_id == user.id).order_by(Project.created_at.desc())
     return (await db.execute(stmt)).scalars().all()
 
 
@@ -49,6 +43,23 @@ async def create_project(
     await db.commit()
     await db.refresh(project)
     return project
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(
+    project_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deletes every diagram in the project too (cascade="all, delete-orphan"
+    on Project.diagrams) — the caller is responsible for warning about that,
+    this endpoint doesn't ask twice."""
+    stmt = select(Project).where(Project.id == project_id, Project.owner_id == user.id)
+    project = (await db.execute(stmt)).scalar_one_or_none()
+    if not project:
+        raise HTTPException(404, "Project not found.")
+    await db.delete(project)
+    await db.commit()
 
 
 # --------------------------------------------------------------------------
@@ -146,6 +157,18 @@ async def update_diagram(
         diagram.tags = payload.tags
     if payload.is_favorite is not None:
         diagram.is_favorite = payload.is_favorite
+    if "project_id" in payload.model_fields_set:
+        if payload.project_id is not None:
+            owned = (
+                await db.execute(
+                    select(Project.id).where(
+                        Project.id == payload.project_id, Project.owner_id == user.id
+                    )
+                )
+            ).scalar_one_or_none()
+            if owned is None:
+                raise HTTPException(404, "Project not found.")
+        diagram.project_id = payload.project_id
 
     if payload.doc is not None:
         if payload.keep_version:

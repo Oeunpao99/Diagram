@@ -35,7 +35,17 @@ class EdgeStyle(str, Enum):
     solid = "solid"
     dashed = "dashed"
     dotted = "dotted"
+    dashdot = "dashdot"
+    longdash = "longdash"
     animated = "animated"
+
+
+class EdgeArrow(str, Enum):
+    none = "none"
+    arrow = "arrow"
+    triangle = "triangle"
+    circle = "circle"
+    diamond = "diamond"
 
 
 class Direction(str, Enum):
@@ -87,16 +97,38 @@ class Edge(BaseModel):
     id: str
     source: str
     target: str
+    source_handle: str | None = Field(
+        default=None,
+        description="Port used on the source node: null/None = right, 'b' = bottom",
+    )
+    target_handle: str | None = Field(
+        default=None,
+        description="Port used on the target node: null/None = left, 't' = top",
+    )
     label: str | None = None
     style: EdgeStyle = EdgeStyle.solid
     condition: str | None = Field(default=None, description="e.g. 'approved' / 'rejected'")
-    bidirectional: bool = False
+    bidirectional: bool = Field(
+        default=False,
+        description="Legacy double-arrow flag; superseded by start_arrow/end_arrow. Kept "
+        "as a fallback for diagrams saved before those fields existed.",
+    )
+    start_arrow: EdgeArrow | None = Field(
+        default=None,
+        description="Marker at the source end. Null defers to the legacy `bidirectional` flag.",
+    )
+    end_arrow: EdgeArrow | None = Field(
+        default=None,
+        description="Marker at the target end. Null defaults to a filled triangle.",
+    )
     curve: str | None = Field(
         default=None,
         description="Connector shape: 'smoothstep' | 'step' | 'straight' | 'bezier'",
     )
     color: str | None = Field(default=None, description="Stroke colour, a hex string")
     width: float | None = Field(default=None, description="Stroke width in pixels")
+    label_color: str | None = Field(default=None, description="Label text colour, a hex string")
+    label_font_size: float | None = Field(default=None, description="Label text size in pixels")
 
 
 class Lane(BaseModel):
@@ -129,6 +161,22 @@ class DiagramDoc(BaseModel):
 class ImprovePromptRequest(BaseModel):
     prompt: str
     diagram_type: DiagramType | None = None
+
+
+class AnalyzeImageRequest(BaseModel):
+    # A full "data:image/png;base64,..." string — the same shape the browser's
+    # FileReader already produces for the image nodes dropped on the canvas.
+    image_data_url: str
+    # Optional context alongside the picture ("this is the checkout flow").
+    prompt: str = ""
+
+
+class GenerateIconRequest(BaseModel):
+    prompt: str
+
+
+class GenerateIconResponse(BaseModel):
+    svg: str
 
 
 class ImprovePromptResponse(BaseModel):
@@ -177,6 +225,59 @@ class EditResponse(BaseModel):
     validation: ValidationReport
 
 
+class RouteMessageRequest(BaseModel):
+    """What the copilot chat sends before deciding whether a message is an
+    edit instruction or a question — same input either way, one classifier
+    call decides which pipeline actually runs."""
+
+    doc: DiagramDoc
+    message: str
+
+
+class RouteMessageResponse(BaseModel):
+    intent: Literal["modify", "ask"]
+    # Only set when intent is "ask" — the conversational answer itself, so a
+    # question resolves in one round trip instead of classify-then-fetch.
+    answer: str | None = None
+
+
+class AgentAction(BaseModel):
+    """One step the agent decided to take — a doc tool the server applies, or
+    a client action (undo, fit view, select) the browser runs."""
+
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRequest(BaseModel):
+    """The copilot chat's single front door. Everything the agent needs to
+    resolve "these", "it", and "that step" is in here — the doc, the message,
+    and whatever the user currently has picked on the canvas."""
+
+    doc: DiagramDoc
+    message: str
+    selection: list[str] = Field(default_factory=list)
+    edge_selection: list[str] = Field(default_factory=list)
+    diagram_id: uuid.UUID | None = None
+
+
+class AgentResponse(BaseModel):
+    intent: Literal["ask", "act", "rewrite"]
+    # "ask": the reply, diagram untouched.
+    answer: str | None = None
+    # "act"/"rewrite": the updated document. None when nothing was changed.
+    doc: DiagramDoc | None = None
+    changes: list[str] = Field(default_factory=list)
+    # Steps the agent wanted but couldn't take (a node it named doesn't
+    # exist, an unknown tool) — surfaced rather than swallowed, so a
+    # half-applied instruction doesn't read as a complete one.
+    warnings: list[str] = Field(default_factory=list)
+    # Actions that live in the browser, not the document: undo, fit view,
+    # zoom, change the canvas selection.
+    client_actions: list[AgentAction] = Field(default_factory=list)
+    validation: ValidationReport | None = None
+
+
 class Issue(BaseModel):
     level: Literal["error", "warning", "info"] = "warning"
     category: Literal["structural", "business", "visual"] = "structural"
@@ -198,6 +299,11 @@ class LayoutRequest(BaseModel):
     doc: DiagramDoc
     direction: Direction | None = None
     algorithm: Literal["layered", "tree", "grid", "swimlane"] = "layered"
+    width: float | None = Field(
+        default=None,
+        description="Target page width in flow px. When set (with height) the layout reshapes itself to fit inside this box — e.g. a 16:9 slide or an A4 page.",
+    )
+    height: float | None = Field(default=None, description="Target page height in flow px")
 
 
 class DocumentationRequest(BaseModel):
@@ -229,6 +335,9 @@ class ProjectOut(BaseModel):
     description: str | None
     color: str
     created_at: datetime
+    # `Project.diagrams` is eager-loaded (lazy="selectin"), so reading this
+    # property is free of an extra query.
+    diagram_count: int
 
 
 class DiagramCreate(BaseModel):
@@ -243,6 +352,11 @@ class DiagramUpdate(BaseModel):
     doc: DiagramDoc | None = None
     tags: list[str] | None = None
     is_favorite: bool | None = None
+    # Moves the diagram into a project, or back out via an explicit null —
+    # unlike the other optional fields here, the route checks
+    # `model_fields_set` rather than `is not None` for this one, so "omitted"
+    # (leave alone) and "sent as null" (clear it) read differently.
+    project_id: uuid.UUID | None = None
     keep_version: bool = True
     version_label: str | None = None
 
@@ -272,6 +386,7 @@ class DiagramListItem(BaseModel):
     title: str
     diagram_type: str
     is_favorite: bool
+    project_id: uuid.UUID | None
     updated_at: datetime
 
 
@@ -300,3 +415,4 @@ class TemplateOut(BaseModel):
 
 GenerateResponse.model_rebuild()
 EditResponse.model_rebuild()
+AgentResponse.model_rebuild()

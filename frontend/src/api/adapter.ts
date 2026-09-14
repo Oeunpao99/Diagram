@@ -1,6 +1,49 @@
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
+import { MarkerType, type Edge, type EdgeMarkerType, type Node } from "@xyflow/react";
 
-import type { DiagramDoc, DiagramNode, EdgeCurve, EdgeStyle, NodeKind } from "./types";
+import type {
+  DiagramDoc,
+  DiagramNode,
+  EdgeArrow,
+  EdgeCurve,
+  EdgeStyle,
+  NodeKind,
+} from "./types";
+
+/** Line dash patterns, shared with the connector toolbar's own previews so
+ *  the popup glyphs always match what actually renders on the canvas. */
+export const EDGE_DASH: Record<EdgeStyle, string | undefined> = {
+  solid: undefined,
+  dashed: "5 4",
+  dotted: "1.5 5",
+  dashdot: "6 2.5 1.5 2.5",
+  longdash: "10 5",
+  animated: "7 6",
+};
+
+/** IDs of the custom `<marker>` defs rendered once by Canvas (circle/diamond
+ *  aren't in React Flow's built-in MarkerType, so these are hand-rolled SVG
+ *  markers referenced by id; see the defs for the matching shapes). */
+const CUSTOM_MARKER_ID: Partial<Record<EdgeArrow, string>> = {
+  circle: "edge-marker-circle",
+  diamond: "edge-marker-diamond",
+};
+
+/** Resolves one end's arrow choice to whatever React Flow's `markerEnd` /
+ *  `markerStart` prop expects: its own coloured MarkerType for arrow/triangle,
+ *  or a bare fragment id into our custom defs for circle/diamond — React Flow
+ *  wraps a string marker in `url('#…')` itself, so passing an already-wrapped
+ *  "url(#id)" here would double-wrap it into a dead reference — or undefined
+ *  for no marker at all. */
+function markerFor(
+  arrow: EdgeArrow,
+  color: string | undefined,
+): EdgeMarkerType | undefined {
+  const customId = CUSTOM_MARKER_ID[arrow];
+  if (customId) return customId;
+  if (arrow === "arrow") return { type: MarkerType.Arrow, width: 16, height: 16, color };
+  if (arrow === "triangle") return { type: MarkerType.ArrowClosed, width: 16, height: 16, color };
+  return undefined;
+}
 
 export interface NewNodeSpec {
   id: string;
@@ -37,15 +80,25 @@ export interface FlowNodeData extends Record<string, unknown> {
   description?: string | null;
   lane?: string | null;
   imageUrl?: string | null;
+  /** Key into ICON_CATALOG — a small glyph drawn beside the label, the way a
+   *  service/architecture diagram names what a box actually is. Unlike
+   *  `imageUrl` (which replaces the label entirely with a standalone image
+   *  node), this sits alongside the label on a normal node. */
+  icon?: string | null;
   style?: DiagramNode["style"];
   width: number;
   height: number;
   /** Set for exactly one sync — the one where an edit introduced this node —
    *  so it can get a brief "just landed" highlight. Never persisted. */
   justAdded?: boolean;
+  /** Only set on the synthetic "title" node — the diagram's title/summary,
+   *  drawn as a heading above the flow instead of living only in the top
+   *  bar's title field. */
+  title?: string;
+  summary?: string | null;
 }
 
-export type FlowNode = Node<FlowNodeData, "diagram" | "lane">;
+export type FlowNode = Node<FlowNodeData, "diagram" | "lane" | "title">;
 
 /** doc -> React Flow. Lanes become non-interactive background bands. */
 export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
@@ -94,6 +147,7 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
         description: node.description,
         lane: node.lane,
         imageUrl: node.image_url,
+        icon: node.icon,
         style: node.style,
         width: node.size.width,
         height: node.size.height,
@@ -101,15 +155,34 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
     });
   }
 
+  // A heading drawn on the canvas itself, not just in the top bar's title
+  // field — `summary` in particular is generated on every AI diagram but,
+  // until this, never shown anywhere. Sits above whatever's topmost (a node,
+  // or a lane band starting at y=0), pans and zooms with the diagram, and
+  // exports with it since it's a real node, not an HTML overlay.
+  if (doc.nodes.length > 0) {
+    const minX = Math.min(...doc.nodes.map((n) => n.position.x));
+    const minY = Math.min(0, ...doc.nodes.map((n) => n.position.y));
+    nodes.push({
+      id: "title__block",
+      type: "title",
+      draggable: false,
+      selectable: false,
+      focusable: false,
+      zIndex: -1,
+      position: { x: minX, y: minY - 130 },
+      data: {
+        label: "",
+        kind: "note",
+        title: doc.title,
+        summary: doc.summary,
+        width: 480,
+        height: 90,
+      },
+    });
+  }
+
   const edges: Edge[] = doc.edges.map((edge) => {
-    // Line pattern dash arrays. "animated" rides React Flow's own animated
-    // dash; the rest get an explicit strokeDasharray.
-    const dash: Record<EdgeStyle, string | undefined> = {
-      solid: undefined,
-      dashed: "5 4",
-      dotted: "1.5 5",
-      animated: undefined,
-    };
     const stroke = edge.color ?? undefined;
     const strokeWidth = edge.width ?? undefined;
     const type: Record<EdgeCurve, string> = {
@@ -118,20 +191,34 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
       straight: "straight",
       bezier: "default",
     };
-    const marker = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: stroke };
+    // Null start/end arrows defer to the legacy `bidirectional` flag (older
+    // saved diagrams) / the historical always-on end triangle.
+    const startArrow = edge.start_arrow ?? (edge.bidirectional ? "triangle" : "none");
+    const endArrow = edge.end_arrow ?? "triangle";
     return {
       id: edge.id,
       source: edge.source,
       target: edge.target,
+      sourceHandle: edge.source_handle ?? undefined,
+      targetHandle: edge.target_handle ?? undefined,
       label: edge.label ?? edge.condition ?? undefined,
       type: edge.curve ? type[edge.curve] : "smoothstep",
       animated: edge.style === "animated",
-      markerEnd: marker,
-      markerStart: edge.bidirectional ? marker : undefined,
+      markerEnd: markerFor(endArrow, stroke),
+      markerStart: markerFor(startArrow, stroke),
       style: {
-        ...(dash[edge.style] ? { strokeDasharray: dash[edge.style] } : {}),
+        ...(EDGE_DASH[edge.style] && edge.style !== "animated"
+          ? { strokeDasharray: EDGE_DASH[edge.style] }
+          : {}),
         ...(stroke ? { stroke } : {}),
         ...(strokeWidth ? { strokeWidth } : {}),
+      },
+      // React Flow renders the label as its own SVG <text>, styled
+      // separately from the path above — this is the only way to give a
+      // label its own colour/size independent of the line's.
+      labelStyle: {
+        ...(edge.label_color ? { fill: edge.label_color } : {}),
+        ...(edge.label_font_size ? { fontSize: edge.label_font_size } : {}),
       },
       labelBgPadding: [6, 3] as [number, number],
       labelBgBorderRadius: 3,
@@ -142,7 +229,11 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
 }
 
 /** React Flow -> doc. Manual drags land back in the document here. */
-export function fromFlow(doc: DiagramDoc, nodes: FlowNode[], edges: Edge[]): DiagramDoc {
+export function fromFlow(
+  doc: DiagramDoc,
+  nodes: FlowNode[],
+  edges: Edge[],
+): DiagramDoc {
   const positions = new Map(nodes.map((n) => [n.id, n.position]));
   const live = new Set(nodes.filter((n) => n.type === "diagram").map((n) => n.id));
 
@@ -189,14 +280,28 @@ export function fromFlow(doc: DiagramDoc, nodes: FlowNode[], edges: Edge[]): Dia
           id: e.id,
           source: e.source,
           target: e.target,
+          source_handle: e.sourceHandle ?? original?.source_handle ?? null,
+          target_handle: e.targetHandle ?? original?.target_handle ?? null,
           label: typeof e.label === "string" ? e.label : (original?.label ?? null),
           style: original?.style ?? (e.animated ? "animated" : "solid"),
           condition: original?.condition ?? null,
           bidirectional: original?.bidirectional ?? false,
+          start_arrow: original?.start_arrow ?? null,
+          end_arrow: original?.end_arrow ?? null,
           curve,
           color: typeof e.style?.stroke === "string" ? e.style.stroke : (original?.color ?? null),
           width:
-            typeof e.style?.strokeWidth === "number" ? e.style.strokeWidth : (original?.width ?? null),
+            typeof e.style?.strokeWidth === "number"
+              ? e.style.strokeWidth
+              : (original?.width ?? null),
+          label_color:
+            typeof e.labelStyle?.fill === "string"
+              ? e.labelStyle.fill
+              : (original?.label_color ?? null),
+          label_font_size:
+            typeof e.labelStyle?.fontSize === "number"
+              ? e.labelStyle.fontSize
+              : (original?.label_font_size ?? null),
         };
       }),
   };

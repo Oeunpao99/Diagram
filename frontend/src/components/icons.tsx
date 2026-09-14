@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** Shared stroke iconography for the Diagram Copilot UI. */
+/** Shared stroke iconography for the Kumnous-គំនូស UI. */
 function S({
   children,
   size = 16,
@@ -27,11 +27,21 @@ function S({
   );
 }
 
+/** Traces the glyph in public/komnous-app-icon.svg (a hub node branching to
+ *  two others through a decision diamond) so every in-app badge — top bar,
+ *  dashboard sidebar, Kumnous AI avatar — matches the app icon/favicon.
+ *  `currentColor` here instead of that file's fixed white/green, since each
+ *  usage site supplies its own badge background and accent colour. */
 export const LogoMark = () => (
-  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" aria-hidden="true">
-    <rect x="6" y="6" width="5" height="5" rx="1.6" fill="currentColor" />
-    <rect x="13" y="13" width="5" height="5" rx="1.6" fill="currentColor" />
-    <path d="M8.5 11.5v2a2 2 0 0 0 2 2h2.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+  <svg viewBox="0 0 100 100" width="12" height="12" fill="none" aria-hidden="true">
+    <path d="M25 14V86" stroke="currentColor" strokeWidth="11" strokeLinecap="round" />
+    <path d="M25 50 79 14" stroke="currentColor" strokeWidth="11" strokeLinecap="round" />
+    <path d="M25 50 79 86" stroke="currentColor" strokeWidth="11" strokeLinecap="round" />
+    <circle cx="79" cy="14" r="8" fill="currentColor" />
+    <circle cx="79" cy="86" r="8" fill="currentColor" />
+    <circle cx="25" cy="86" r="8" fill="currentColor" />
+    <circle cx="25" cy="14" r="8" fill="currentColor" />
+    <path d="M25 37 38 50 25 63 12 50Z" fill="currentColor" />
   </svg>
 );
 
@@ -171,6 +181,22 @@ export const FileCode = () => (
   <S>
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
     <path d="M14 2v6h6M10 13l-2 2 2 2M14 13l2 2-2 2" />
+  </S>
+);
+
+export const FileUp = () => (
+  <S>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+    <path d="M14 2v6h6" />
+    <path d="M12 12v7M9 15l3-3 3 3" />
+  </S>
+);
+
+export const ClipboardPaste = () => (
+  <S>
+    <path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z" />
+    <path d="M16 4h1a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1" />
+    <path d="M9 12h6M9 16h6" />
   </S>
 );
 
@@ -407,5 +433,86 @@ export const Monitor = () => (
   <S>
     <rect x="3" y="4" width="18" height="12" rx="2" />
     <path d="M9 20h6M12 16v4" />
+  </S>
+);
+
+export const Home = () => (
+  <S>
+    <path d="m3 11 9-7 9 7" />
+    <path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" />
+  </S>
+);
+
+export const Star = () => (
+  <S>
+    <path d="m12 2.6 2.9 6 6.6.9-4.8 4.6 1.1 6.5L12 17.5l-5.8 3.1 1.1-6.5-4.8-4.6 6.6-.9Z" />
+  </S>
+);
+
+export const Clock = () => (
+  <S>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5.3l3.5 2" />
+  </S>
+);
+
+export const Grid = () => (
+  <S>
+    <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.4" />
+    <rect x="13" y="3.5" width="7.5" height="7.5" rx="1.4" />
+    <rect x="3.5" y="13" width="7.5" height="7.5" rx="1.4" />
+    <rect x="13" y="13" width="7.5" height="7.5" rx="1.4" />
+  </S>
+);
+
+export const Folder = () => (
+  <S>
+    <path d="M3.5 6.5a1 1 0 0 1 1-1h5l1.8 2.2h8.2a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1Z" />
+  </S>
+);
+
+export const Briefcase = () => (
+  <S>
+    <rect x="3" y="7.5" width="18" height="12" rx="1.8" />
+    <path d="M8.5 7.5V6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1.5M3 13h18" />
+  </S>
+);
+
+export const Cpu = () => (
+  <S>
+    <rect x="7" y="7" width="10" height="10" rx="1.6" />
+    <rect x="10" y="10" width="4" height="4" rx="0.8" />
+    <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+  </S>
+);
+
+export const Truck = () => (
+  <S>
+    <path d="M3 7h10v9H3zM13 10h4l3 3v3h-7z" />
+    <circle cx="7.5" cy="18" r="1.6" />
+    <circle cx="16.5" cy="18" r="1.6" />
+  </S>
+);
+
+export const ClipboardList = () => (
+  <S>
+    <rect x="5" y="4.5" width="14" height="16" rx="1.8" />
+    <path d="M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1Z" />
+    <path d="M8.5 11h7M8.5 14.5h7M8.5 17.5h4.5" />
+  </S>
+);
+
+/** Page-aspect glyph — one square and one wide sheet, echoing shapes when
+ *  e.g. 1:1 vs 16:9 is selected. */
+export const Ratio = ({ ratio }: { ratio?: number }) => (
+  <S size={14} stroke={2}>
+    <rect x="3" y="3" width="8" height="8" rx="1.5" />
+    <rect
+      x="13"
+      y="5.5"
+      width={ratio && ratio < 1 ? 8 : 9}
+      height={ratio && ratio < 1 ? 9 : 8}
+      rx="1.5"
+    />
   </S>
 );

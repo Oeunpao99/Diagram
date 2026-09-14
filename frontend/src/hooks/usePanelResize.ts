@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "dc.panel-width";
+const COLLAPSED_KEY = "dc.panel-collapsed";
 const MIN = 300;
 const MAX = 640;
 const DEFAULT = 360;
+const COLLAPSED_WIDTH = 44;
 
 function clamp(width: number): number {
   const viewportCap = window.innerWidth * 0.6; // never eat the whole canvas
@@ -14,13 +16,26 @@ function apply(width: number) {
   document.documentElement.style.setProperty("--panel", `${width}px`);
 }
 
-/** Restores the saved Copilot panel width once, before first paint would
- *  otherwise flash the default. Call from the app shell, not the panel
- *  itself, so it runs regardless of whether the panel is mounted yet. */
+function savedWidth(): number {
+  const saved = Number(localStorage.getItem(STORAGE_KEY));
+  return saved > 0 ? clamp(saved) : DEFAULT;
+}
+
+function isCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Restores the saved Copilot panel width (or its collapsed rail) once,
+ *  before first paint would otherwise flash the default. Call from the app
+ *  shell, not the panel itself, so it runs regardless of whether the panel
+ *  is mounted yet. */
 export function restorePanelWidth() {
   try {
-    const saved = Number(localStorage.getItem(STORAGE_KEY));
-    apply(saved > 0 ? clamp(saved) : DEFAULT);
+    apply(isCollapsed() ? COLLAPSED_WIDTH : savedWidth());
   } catch {
     apply(DEFAULT);
   }
@@ -63,4 +78,28 @@ export function usePanelResize() {
   }, []);
 
   return { onPointerDown };
+}
+
+/** Collapse the Copilot panel down to a slim icon rail, or restore it to
+ *  whatever width it was dragged to before. The width itself keeps living in
+ *  the `--panel` CSS var (same one drag-resize writes to) so collapsing is
+ *  just "temporarily point that var at a fixed slim width" rather than a
+ *  second, competing layout mechanism. */
+export function usePanelCollapse() {
+  const [collapsed, setCollapsed] = useState(isCollapsed);
+
+  const toggle = useCallback(() => {
+    setCollapsed((was) => {
+      const next = !was;
+      apply(next ? COLLAPSED_WIDTH : savedWidth());
+      try {
+        localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        /* per-session only */
+      }
+      return next;
+    });
+  }, []);
+
+  return { collapsed, toggle };
 }

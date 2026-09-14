@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   Diagram Copilot — Tailwind v4 entry.
+   Kumnous-គំនូស — Tailwind v4 entry.
    Design tokens are CSS custom properties (light/dark/accent); @theme inline
    maps them onto Tailwind utilities so `bg-surface`, `text-ink` etc. follow
    the active theme automatically. Node shapes, React Flow cosmetics and the
@@ -35,7 +35,9 @@
   --shadow-2: var(--shadow-2);
   --shadow-3: var(--shadow-3);
 
-  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans: "Inter", "Kantumruy Pro", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-sans:
+    "Inter", "Kantumruy Pro", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 }
 
@@ -87,7 +89,13 @@
   --rail: 272px;
   --panel: 360px;
 
-  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family:
+    "Inter",
+    "Kantumruy Pro",
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    sans-serif;
   color: var(--ink);
   font-synthesis-weight: none;
   -webkit-font-smoothing: antialiased;
@@ -391,6 +399,17 @@
   transition: none;
 }
 
+/* An edit lands on the canvas instantly (no rehearsal replay) but still gets
+   a quick cross-fade — briefly dip toward transparent and back — so the
+   change reads as a soft transition rather than an abrupt cut. Its own
+   (faster) transition duration, since this dip is meant to be quick where
+   the rehearsal fade above is a deliberate hand-off to the sketch overlay. */
+[data-edit-fade="true"] .react-flow__nodes,
+[data-edit-fade="true"] .react-flow__edges {
+  opacity: 0.1;
+  transition: opacity 140ms ease;
+}
+
 .rehearse svg {
   position: absolute;
   inset: 0;
@@ -456,13 +475,6 @@
 
 .typing i:nth-child(3) {
   animation-delay: 0.3s;
-}
-
-/* AI chat bubbles — green-soft at 80% over the panel so they stay visible
-   next to the plain surface around them. */
-
-.chat-bubble-ai {
-  background: color-mix(in srgb, var(--green-soft) 80%, var(--surface));
 }
 
 /* ------------------------------------------------------------- color input */
@@ -557,7 +569,9 @@
 .react-flow__edge-path {
   stroke: var(--slate);
   stroke-width: 1.6;
-  transition: stroke 120ms ease, stroke-width 120ms ease;
+  transition:
+    stroke 120ms ease,
+    stroke-width 120ms ease;
 }
 
 /* The invisible wide hit-path React Flow lays under every edge for easier
@@ -604,25 +618,13 @@
   line-height: 1.35;
   text-align: center;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
     0 1px 2px rgba(15, 23, 42, 0.06),
-    0 4px 14px rgba(15, 23, 42, 0.1);
-  transition: box-shadow 130ms ease, transform 130ms ease, border-color 130ms ease;
+    0 3px 10px rgba(15, 23, 42, 0.08);
+  transition:
+    box-shadow 130ms ease,
+    transform 130ms ease,
+    border-color 130ms ease;
   cursor: grab;
-}
-
-/* A soft sheen across the top edge — reads as light falling on the shape and
-   gives even the flat tints a whisper of depth. Sits under the label (which
-   is positioned and paints above), and diamond/cylinder replace their own
-   ::before further down the sheet. */
-.node::before {
-  content: "";
-  position: absolute;
-  inset: 2px 2px 52% 2px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
-  pointer-events: none;
 }
 
 /* Shadow only, no border-color change — a kind-coloured border (the amber
@@ -637,8 +639,6 @@
    the same shadow feedback. */
 .node:hover:not(.is-selected):not(.node--diamond):not(.node--para) {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
     0 2px 4px rgba(15, 23, 42, 0.08),
     0 8px 20px rgba(15, 23, 42, 0.13);
   transform: translateY(-1.5px);
@@ -647,8 +647,6 @@
 .node--diamond:hover:not(.is-selected),
 .node--para:hover:not(.is-selected) {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
     0 2px 4px rgba(15, 23, 42, 0.08),
     0 8px 20px rgba(15, 23, 42, 0.13);
 }
@@ -658,7 +656,14 @@
   box-shadow: 0 0 0 2px var(--green-ring);
 }
 
-.node.is-selected::after {
+/* Not on diamonds: clip-path (unlike a transform) clips an element's entire
+   paint, pseudo-elements included, to its polygon — this ring sits outside
+   the box on purpose (inset: -5px) to read as a halo, so on a clipped
+   element it would fall outside that polygon and simply never paint. The
+   box-shadow ring from .is-selected above still shows on every shape,
+   diamonds included, since clip-path draws it right at the shape's own
+   edge instead of offset beyond it. */
+.node.is-selected:not(.node--diamond)::after {
   content: "";
   position: absolute;
   inset: -5px;
@@ -671,6 +676,27 @@
   position: relative;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+/* A node's own glyph, sitting beside the label the way a service box in an
+   architecture diagram names what it actually is. Inherits the node's text
+   colour so it stays legible against every kind/colour combination, and
+   never shrinks — the label wraps instead. */
+.node__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-right: 7px;
+  opacity: 0.82;
+}
+
+/* Diamonds and pills are tight on horizontal room — the label already sits
+   at the shape's narrowest usable band, so an inline icon would squeeze it
+   into an unreadable column. */
+.node--diamond .node__icon,
+.node--pill .node__icon {
+  display: none;
 }
 
 .node__label-input {
@@ -701,31 +727,23 @@
   color: var(--on-ink);
 }
 
+/* A diamond via clip-path, not a 45°-rotated square. Rotating a rectangle
+   only looks like a proper diamond when it's near-square — a decision node
+   sized for a long label (auto-widened in the layout engine, e.g. "Quality
+   checks pass?") rotates into a thin, elongated rhombus whose visible sliver
+   no longer lines up with the label or the connectors, and needed a
+   corner-masking pseudo-element to hide the parts of the rotated box outside
+   that sliver. clip-path instead cuts the diamond directly out of the box's
+   own width/height, at any aspect ratio, so it stays a clean diamond and the
+   label — centred, sitting exactly at the shape's widest point — always
+   fits. No rotation means no corners to mask, and the box's own Left/Right/
+   Top/Bottom connector handles already sit exactly on the diamond's points. */
 .node--diamond {
-  transform: rotate(45deg);
-  border-radius: 4px;
-}
-
-/* A 45°-rotated square only paints the diamond inscribed inside its own
-   bounding box — the four corners of that box (as React Flow's layout and
-   edge routing see it, which know nothing about the rotation) are outside
-   the visible diamond and paint nothing. An edge elbow that lands in one of
-   those corners shows through to the canvas, which reads as "the connector
-   cuts through the shape". This pseudo-element counter-rotates to realign
-   with that same unrotated box and fills it with the canvas colour, so
-   anything passing through a corner is masked before the diamond itself
-   (still on top, in its own local stacking context) draws over it. */
-.node--diamond::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: rotate(-45deg);
-  background: var(--paper);
-  z-index: -1;
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  border-radius: 0;
 }
 
 .node--diamond .node__label {
-  transform: rotate(-45deg);
   font-size: 11px;
 }
 
@@ -744,7 +762,11 @@
   right: 13%;
   height: 26%;
   border-radius: 50% / 100%;
-  background: linear-gradient(180deg, rgba(16, 24, 26, 0.05), rgba(255, 255, 255, 0.65));
+  background: linear-gradient(
+    180deg,
+    rgba(16, 24, 26, 0.05),
+    rgba(255, 255, 255, 0.65)
+  );
   pointer-events: none;
 }
 
@@ -888,14 +910,30 @@
 }
 
 .node__port {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+
+.node__port::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   width: 7px;
   height: 7px;
   background: var(--surface);
   border: 1.5px solid var(--green);
+  border-radius: 50%;
+  box-sizing: border-box;
 }
 
-.node__port:hover {
+.node__port:hover::before {
   border-color: var(--green-deep);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-deep) 18%, transparent);
 }
 
 .node__corner {
@@ -958,6 +996,29 @@
   border-left-color: var(--green);
   border-left-width: 2px;
   background: rgba(231, 246, 240, 0.4);
+}
+
+/* ----------------------------------------------------------- title block */
+
+.title-block {
+  pointer-events: none;
+  user-select: none;
+}
+
+.title-block__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--ink-strong);
+}
+
+.title-block__summary {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--slate);
+  max-width: 60ch;
 }
 
 /* ---------------------------------------------------------------- banner */

@@ -1,5 +1,6 @@
 import type {
   Accent,
+  AgentResult,
   DiagramDoc,
   DiagramListItem,
   DiagramOut,
@@ -8,6 +9,8 @@ import type {
   EditResult,
   GenerateResult,
   ImprovedPrompt,
+  Project,
+  RouteResult,
   Template,
   Theme,
   TokenResponse,
@@ -144,10 +147,44 @@ export const api = {
     diagramId?: string | null,
   ) => post<EditResult>("/ai/edit", { doc, instruction, selection, relayout, diagram_id: diagramId }),
 
+  // The copilot chat's front door once a diagram exists: one call answers a
+  // question, applies a precise list of tool calls, or falls through to the
+  // whole-document edit agent. `selection` is what makes "make these red"
+  // resolvable — without it the agent has no idea what "these" means.
+  agent: (
+    doc: DiagramDoc,
+    message: string,
+    selection: string[] = [],
+    edgeSelection: string[] = [],
+    diagramId?: string | null,
+  ) =>
+    post<AgentResult>("/ai/agent", {
+      doc,
+      message,
+      selection,
+      edge_selection: edgeSelection,
+      diagram_id: diagramId,
+    }),
+
+  // The classify-only half of the above, kept for callers that want the
+  // decision without the action.
+  routeMessage: (doc: DiagramDoc, message: string) =>
+    post<RouteResult>("/ai/route", { doc, message }),
+
   validate: (doc: DiagramDoc) => post<ValidationReport>("/ai/validate", doc),
 
-  layout: (doc: DiagramDoc, direction?: Direction, algorithm = "layered") =>
-    post<DiagramDoc>("/ai/layout", { doc, direction, algorithm }),
+  layout: (
+    doc: DiagramDoc,
+    direction?: Direction,
+    algorithm = "layered",
+    size?: { width: number; height: number } | null,
+  ) =>
+    post<DiagramDoc>("/ai/layout", {
+      doc,
+      direction,
+      algorithm,
+      ...(size ? { width: size.width, height: size.height } : {}),
+    }),
 
   documentation: (doc: DiagramDoc, audience: "internal" | "customer" | "developer") =>
     post<{ markdown: string }>("/ai/documentation", { doc, audience }),
@@ -165,12 +202,35 @@ export const api = {
       "PATCH",
     ),
 
-  createDiagram: (doc: DiagramDoc) =>
-    post<DiagramOut>("/diagrams", { title: doc.title, doc }),
+  createDiagram: (doc: DiagramDoc, projectId?: string) =>
+    post<DiagramOut>("/diagrams", { title: doc.title, doc, project_id: projectId }),
 
-  listDiagrams: (limit = 40) => get<DiagramListItem[]>(`/diagrams?limit=${limit}`),
+  listDiagrams: (limit = 40, favorite?: boolean, projectId?: string) =>
+    get<DiagramListItem[]>(
+      `/diagrams?limit=${limit}` +
+        (favorite === undefined ? "" : `&favorite=${favorite}`) +
+        (projectId === undefined ? "" : `&project_id=${projectId}`),
+    ),
+
+  // `doc` stays out of the body entirely (not just falsy) — the backend only
+  // skips minting a new DiagramVersion when the `doc` key is absent, and only
+  // starring/unstarring shouldn't count as an edit worth a version snapshot.
+  setFavorite: (id: string, is_favorite: boolean) =>
+    post<DiagramOut>(`/diagrams/${id}`, { is_favorite }, "PATCH"),
+
+  // `project_id: null` explicitly clears it (removes the diagram from its
+  // project) — the backend tells "omitted" and "sent as null" apart.
+  setProject: (id: string, project_id: string | null) =>
+    post<DiagramOut>(`/diagrams/${id}`, { project_id }, "PATCH"),
 
   getDiagram: (id: string) => get<DiagramOut>(`/diagrams/${id}`),
+
+  listProjects: () => get<Project[]>("/projects"),
+
+  createProject: (name: string, description?: string, color?: string) =>
+    post<Project>("/projects", { name, description, color }),
+
+  deleteProject: (id: string) => del(`/projects/${id}`),
 
   deleteDiagram: (id: string) => del(`/diagrams/${id}`),
 

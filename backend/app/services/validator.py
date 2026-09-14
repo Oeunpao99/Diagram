@@ -9,10 +9,15 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from app.schemas.diagram import DiagramDoc, Issue, NodeKind, ValidationReport
+from app.schemas.diagram import DiagramDoc, DiagramType, Issue, NodeKind, ValidationReport
 
 APPROVAL_WORDS = ("approve", "verify", "check", "review", "inspect", "validate", "confirm")
 REJECT_WORDS = ("reject", "fail", "deny", "return", "decline", "hold", "exception", "no")
+
+# Decision and approval rules only make sense where a diagram describes a
+# progression through time. An architecture or network diagram isn't "approving"
+# anything — "Inspection service" is not a step that needs a rejection branch.
+FLOW_TYPES = frozenset({DiagramType.process_flow, DiagramType.swimlane, DiagramType.data_flow})
 
 
 def validate(doc: DiagramDoc) -> ValidationReport:
@@ -125,54 +130,55 @@ def _business(doc: DiagramDoc) -> list[Issue]:
             )
         )
 
-    for node in doc.nodes:
-        outs = outgoing[node.id]
-        label = node.label.lower()
+    if doc.diagram_type in FLOW_TYPES:
+        for node in doc.nodes:
+            outs = outgoing[node.id]
+            label = node.label.lower()
 
-        if node.kind == NodeKind.decision:
-            if len(outs) < 2:
-                issues.append(
-                    Issue(
-                        level="warning",
-                        category="business",
-                        message=f"Decision '{node.label}' has only one way out.",
-                        node_ids=[node.id],
-                        fixable=True,
+            if node.kind == NodeKind.decision:
+                if len(outs) < 2:
+                    issues.append(
+                        Issue(
+                            level="warning",
+                            category="business",
+                            message=f"Decision '{node.label}' has only one way out.",
+                            node_ids=[node.id],
+                            fixable=True,
+                        )
                     )
-                )
-            elif not any(e.label or e.condition for e in outs):
-                issues.append(
-                    Issue(
-                        level="info",
-                        category="business",
-                        message=f"The branches out of '{node.label}' aren't labelled.",
-                        node_ids=[node.id],
-                        fixable=True,
+                elif not any(e.label or e.condition for e in outs):
+                    issues.append(
+                        Issue(
+                            level="info",
+                            category="business",
+                            message=f"The branches out of '{node.label}' aren't labelled.",
+                            node_ids=[node.id],
+                            fixable=True,
+                        )
                     )
-                )
 
-        if any(w in label for w in APPROVAL_WORDS):
-            # The rejection branch usually hangs off a decision node one hop
-            # downstream ("Verify docs" -> "Docs complete?" -> "Request again"),
-            # so look through decisions before calling it missing.
-            reachable = list(outs)
-            for edge in outs:
-                if _kind_of(doc, edge.target) == NodeKind.decision:
-                    reachable += outgoing[edge.target]
-            branch_text = " ".join(
-                " ".join(filter(None, [e.label, e.condition, _target_label(doc, e.target)]))
-                for e in reachable
-            ).lower()
-            if outs and not any(w in branch_text for w in REJECT_WORDS):
-                issues.append(
-                    Issue(
-                        level="warning",
-                        category="business",
-                        message=f"'{node.label}' has no rejection or failure path.",
-                        node_ids=[node.id],
-                        fixable=True,
+            if node.kind != NodeKind.actor and any(w in label for w in APPROVAL_WORDS):
+                # The rejection branch usually hangs off a decision node one hop
+                # downstream ("Verify docs" -> "Docs complete?" -> "Request again"),
+                # so look through decisions before calling it missing.
+                reachable = list(outs)
+                for edge in outs:
+                    if _kind_of(doc, edge.target) == NodeKind.decision:
+                        reachable += outgoing[edge.target]
+                branch_text = " ".join(
+                    " ".join(filter(None, [e.label, e.condition, _target_label(doc, e.target)]))
+                    for e in reachable
+                ).lower()
+                if outs and not any(w in branch_text for w in REJECT_WORDS):
+                    issues.append(
+                        Issue(
+                            level="warning",
+                            category="business",
+                            message=f"'{node.label}' has no rejection or failure path.",
+                            node_ids=[node.id],
+                            fixable=True,
+                        )
                     )
-                )
 
     for node in doc.nodes:
         if node.kind == NodeKind.actor and not outgoing[node.id] and not incoming[node.id]:
