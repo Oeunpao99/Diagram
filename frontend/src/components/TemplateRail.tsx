@@ -13,6 +13,7 @@ import { useCanvasAssets } from "../hooks/useCanvasAssets";
 import { useDiagram } from "../store/useDiagram";
 import { ASSET_LIBRARY } from "./assetLibrary";
 import {
+  Alert,
   Check,
   ChevronDown,
   CircleDot,
@@ -21,6 +22,7 @@ import {
   Layers,
   Plus,
   Search,
+  Sparkles,
   Trash,
   Upload,
 } from "./icons";
@@ -525,16 +527,48 @@ function TemplatesPane() {
 function AssetsPane() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
-  const { addShape, addImage } = useCanvasAssets();
+  const { addShape, addImage, addImageDataUrl } = useCanvasAssets();
   // Select the stable `nodes` reference and filter in a memo — filtering
   // inline inside the selector hands zustand a new array every render, which
   // it reads as "state changed" and re-renders forever.
   const nodes = useDiagram((s) => s.doc.nodes);
   const images = useMemo(() => nodes.filter((n) => n.image_url), [nodes]);
 
+  const [iconPrompt, setIconPrompt] = useState("");
+  const [iconBusy, setIconBusy] = useState(false);
+  const [iconError, setIconError] = useState<string | null>(null);
+  const [iconResult, setIconResult] = useState<{ prompt: string; svg: string } | null>(null);
+
   const onFiles = (files: FileList | null) => {
     const file = files?.[0];
     if (file?.type.startsWith("image/")) addImage(file);
+  };
+
+  const iconDataUrl = (svg: string) => `data:image/svg+xml,${encodeURIComponent(svg)}`;
+
+  const generateIcon = async () => {
+    const prompt = iconPrompt.trim();
+    if (!prompt || iconBusy) return;
+    setIconBusy(true);
+    setIconError(null);
+    try {
+      const { svg } = await api.generateIcon(prompt);
+      setIconResult({ prompt, svg });
+    } catch (error) {
+      setIconError(error instanceof Error ? error.message : "Couldn't draw that icon.");
+    } finally {
+      setIconBusy(false);
+    }
+  };
+
+  const addIconToCanvas = () => {
+    if (!iconResult) return;
+    addImageDataUrl(iconDataUrl(iconResult.svg), iconResult.prompt, undefined, {
+      width: 72,
+      height: 72,
+    });
+    setIconResult(null);
+    setIconPrompt("");
   };
 
   return (
@@ -574,8 +608,60 @@ function AssetsPane() {
       />
 
       <div className="border-b border-line pb-[9px] last:border-b-0">
-        <p className="mx-0.5 mt-1 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
-          Icon library
+        <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+          <Sparkles /> Generate an icon
+        </p>
+        <div className="mt-2 flex gap-1.5">
+          <input
+            value={iconPrompt}
+            onChange={(event) => setIconPrompt(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void generateIcon();
+              }
+            }}
+            placeholder="e.g. a padlock, a forklift…"
+            className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-[7px] text-[12.5px] text-ink outline-none placeholder:text-slate-soft focus-visible:border-green"
+          />
+          <button
+            type="button"
+            onClick={() => void generateIcon()}
+            disabled={!iconPrompt.trim() || iconBusy}
+            className="shrink-0 rounded-md border border-green bg-green px-2.5 text-[12px] font-semibold text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {iconBusy ? <span className="icon-gen__spin" aria-hidden="true" /> : "Generate"}
+          </button>
+        </div>
+
+        {iconError && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-[550] text-red">
+            <Alert /> {iconError}
+          </p>
+        )}
+
+        {iconResult && (
+          <div className="mt-2 flex items-center gap-2.5 rounded-md border border-line bg-surface p-1.5">
+            <span
+              className="h-[42px] w-[42px] shrink-0 rounded-[6px] border border-line bg-paper bg-contain bg-center bg-no-repeat p-1.5"
+              style={{ backgroundImage: `url(${iconDataUrl(iconResult.svg)})` }}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{iconResult.prompt}</span>
+            <button
+              type="button"
+              onClick={addIconToCanvas}
+              className="shrink-0 rounded-md border border-green bg-green-soft px-2 py-1 text-[11.5px] font-semibold text-green transition-colors hover:bg-green hover:text-white"
+            >
+              Add to canvas
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="border-b border-line pb-[9px] last:border-b-0">
+        <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+          <Sparkles /> Icon library
         </p>
         <div className="mt-2 grid grid-cols-4 gap-[7px]">
           {ASSET_LIBRARY.map((asset) => (
