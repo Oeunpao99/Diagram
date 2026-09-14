@@ -557,9 +557,23 @@
 .react-flow__edge-path {
   stroke: var(--slate);
   stroke-width: 1.6;
+  transition: stroke 120ms ease, stroke-width 120ms ease;
+}
+
+/* The invisible wide hit-path React Flow lays under every edge for easier
+   clicking — hovering it is hovering the edge, so it's what should carry the
+   hover feedback rather than trying to catch pointer events on the thin
+   visible line itself. */
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--ink);
+  stroke-width: 2.2;
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--green);
+}
+
+.react-flow__edge.selected:hover .react-flow__edge-path {
   stroke: var(--green);
 }
 
@@ -589,8 +603,54 @@
   font-weight: 500;
   line-height: 1.35;
   text-align: center;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.09);
-  transition: box-shadow 130ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 4px 14px rgba(15, 23, 42, 0.1);
+  transition: box-shadow 130ms ease, transform 130ms ease, border-color 130ms ease;
+  cursor: grab;
+}
+
+/* A soft sheen across the top edge — reads as light falling on the shape and
+   gives even the flat tints a whisper of depth. Sits under the label (which
+   is positioned and paints above), and diamond/cylinder replace their own
+   ::before further down the sheet. */
+.node::before {
+  content: "";
+  position: absolute;
+  inset: 2px 2px 52% 2px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+
+/* Shadow only, no border-color change — a kind-coloured border (the amber
+   decision, the green database) should stay that colour on hover, not wash
+   out to a neutral one. Not on top of the selection ring, which is its own
+   feedback already. The lift transform lives on this inner div, separate
+   from the drag position React Flow puts on its own outer wrapper, so it
+   doesn't fight dragging. Diamond and parallelogram shapes skip the
+   translate: they already carry their own transform (rotate/skew), and
+   transforms don't compose across separate rules — the lift would just
+   replace it and snap the shape back to a plain rectangle. They still get
+   the same shadow feedback. */
+.node:hover:not(.is-selected):not(.node--diamond):not(.node--para) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
+    0 2px 4px rgba(15, 23, 42, 0.08),
+    0 8px 20px rgba(15, 23, 42, 0.13);
+  transform: translateY(-1.5px);
+}
+
+.node--diamond:hover:not(.is-selected),
+.node--para:hover:not(.is-selected) {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.05),
+    0 2px 4px rgba(15, 23, 42, 0.08),
+    0 8px 20px rgba(15, 23, 42, 0.13);
 }
 
 .node.is-selected {
@@ -741,6 +801,10 @@
   padding: 2px 4px;
 }
 
+.node--text-only::before {
+  display: none;
+}
+
 /* A node an edit just introduced — everything else on the canvas stays put,
    this is the only thing that draws the eye to what actually changed. */
 .node--just-added {
@@ -809,11 +873,13 @@
 
 .node--kind-decision {
   border-color: var(--amber);
+  background: #faf1de;
 }
 
 .node--kind-database,
 .node--kind-data {
   border-color: #3f7a63;
+  background: #e8f3ee;
 }
 
 .node--kind-service,
