@@ -40,6 +40,18 @@ const TYPE_LABEL: Record<DiagramType, string> = {
 };
 
 /** Tint (bg, border, ink) per diagram type, matching the old rail thumb hues. */
+const TYPE_HUE: Record<DiagramType, string> = {
+  process_flow: "violet",
+  swimlane: "blue",
+  architecture: "navy",
+  network: "teal",
+  sequence: "amber",
+  er: "pink",
+  data_flow: "green",
+  org_chart: "orange",
+  mind_map: "red",
+};
+
 const TINT: Record<string, [string, string, string]> = {
   violet: ["#f1eefc", "#e2dcf8", "#6a5bd5"],
   blue: ["#ebf0fc", "#dae4f7", "#4a76cf"],
@@ -51,6 +63,11 @@ const TINT: Record<string, [string, string, string]> = {
   orange: ["#faece3", "#f2d7c7", "#c1763a"],
   red: ["#fae8e6", "#f2d2cf", "#c6574f"],
 };
+
+function tintFor(type: DiagramType) {
+  const hue = TYPE_HUE[type];
+  return TINT[hue] ?? ["#eaf0f6", "#d6e0ea", "#48617e"];
+}
 
 /** Backend categories are lowercase slugs; present them product-first. */
 const CATEGORY_LABEL: Record<string, string> = {
@@ -417,11 +434,10 @@ function TemplatesPane() {
                         aria-current={active ? "true" : undefined}
                         onClick={() => void use(template)}
                         style={
-                          {
-                            "--tint": TINT[template.diagram_type]?.[0],
-                            "--tint-line": TINT[template.diagram_type]?.[1],
-                            "--tint-ink": TINT[template.diagram_type]?.[2],
-                          } as CSSProperties
+                          (() => {
+                            const [bg, line, ink] = tintFor(template.diagram_type);
+                            return { "--tint": bg, "--tint-line": line, "--tint-ink": ink } as CSSProperties;
+                          })()
                         }
                       >
                         <span
