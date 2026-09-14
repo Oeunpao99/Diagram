@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { usePanelResize } from "../hooks/usePanelResize";
 import { useDiagram } from "../store/useDiagram";
-import { Alert, ArrowRight, Check, ImageIcon, LogoMark, Send, Sparkles, X } from "./icons";
+import { Alert, ArrowRight, Check, ImageIcon, LogoMark, Send, Sparkles, UserIcon, X } from "./icons";
 
 const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url cap with room to spare
 
@@ -228,8 +228,8 @@ export function Copilot() {
 
         {messages.map((message) => (
           <div key={message.id} className={`flex max-w-full gap-2 ${message.role === "user" ? "flex-row-reverse" : ""}`}>
-            <span className={`grid size-6 shrink-0 place-items-center rounded-full border border-green-line text-[10px] font-[650] [&_svg]:size-3 ${message.role === "user" ? "bg-[#dcebe5] text-green-deep" : "bg-green-soft text-green-strong"}`}>
-              {message.role === "ai" ? <LogoMark /> : "You"}
+            <span className={`grid size-7 shrink-0 place-items-center rounded-full border border-green-line [&_svg]:size-[15px] ${message.role === "user" ? "bg-[#dcebe5] text-green-deep" : "bg-green-soft text-green-strong"}`}>
+              {message.role === "ai" ? <LogoMark /> : <UserIcon />}
             </span>
             <div className={`min-w-0 rounded-[11px] px-[11px] py-[9px] text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-br-[4px] bg-green text-on-accent" : "max-w-full whitespace-pre-wrap rounded-bl-[4px] border border-line chat-bubble-ai"}`}>
               {message.text}
@@ -239,7 +239,7 @@ export function Copilot() {
 
         {(busy === "improving" || busy === "analyzing") && (
           <div className="flex max-w-full gap-2">
-            <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
@@ -259,7 +259,7 @@ export function Copilot() {
 
         {improved && (
           <div className="flex max-w-full gap-2">
-            <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
@@ -345,7 +345,7 @@ export function Copilot() {
 
         {busy === "editing" && (
           <div className="flex max-w-full gap-2">
-            <span className="grid size-6 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-3">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
             <div className="min-w-0 max-w-full whitespace-pre-wrap rounded-bl-[4px] rounded-[11px] border border-line chat-bubble-ai px-[11px] py-[9px] text-[12.5px] leading-[1.5]">
