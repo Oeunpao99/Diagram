@@ -305,7 +305,7 @@ function TemplatesPane() {
         <input
           ref={searchRef}
           type="search"
-          className="w-full rounded-md border border-line bg-paper py-[7px] pl-[30px] pr-2.5 text-[12.5px] text-ink outline-none transition-[border-color,background,box-shadow] placeholder:text-slate-soft focus:border-green focus:bg-surface focus:shadow-[0_0_0_3px_var(--green-ring)]"
+          className="w-full rounded-md border border-line bg-paper py-2.5 pl-[30px] pr-2.5 text-[13px] text-ink outline-none transition-[border-color,background,box-shadow] placeholder:text-slate-soft focus:border-green focus:bg-surface focus:shadow-[0_0_0_3px_var(--green-ring)]"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search templates…"
