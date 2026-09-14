@@ -25,6 +25,7 @@ import { EdgeToolbar } from "./EdgeToolbar";
 import { RehearsalOverlay } from "./RehearsalOverlay";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { nodeTypes } from "./nodes";
+import { takeSkipNextDocFit } from "../lib/docFit";
 
 /** AI operations whose result gets the "pen is drawing this" rehearsal — a
  *  brand-new or fully re-laid-out diagram, where hiding the canvas and
@@ -118,7 +119,7 @@ export function Canvas() {
         return prev ? { ...e, selected: prev.selected } : e;
       });
     });
-    const skipFit = skipNextFitView.current;
+    const skipFit = takeSkipNextDocFit() || skipNextFitView.current;
     skipNextFitView.current = false;
     const id = window.setTimeout(() => {
       syncing.current = false;

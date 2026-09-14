@@ -834,33 +834,39 @@
 
 .node__corner {
   position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
   background: var(--surface);
   border: 1.5px solid var(--green);
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: none;
   z-index: 2;
+  transition: background 100ms ease;
+}
+
+.node__corner:hover {
+  background: var(--green);
 }
 
 .node__corner--tl {
-  top: -6px;
-  left: -6px;
+  top: -7px;
+  left: -7px;
 }
 
 .node__corner--tr {
-  top: -6px;
-  right: -6px;
+  top: -7px;
+  right: -7px;
 }
 
 .node__corner--bl {
-  bottom: -6px;
-  left: -6px;
+  bottom: -7px;
+  left: -7px;
 }
 
 .node__corner--br {
-  bottom: -6px;
-  right: -6px;
+  bottom: -7px;
+  right: -7px;
 }
 
 /* swimlane bands */

@@ -1,8 +1,9 @@
-import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { Handle, Position, useReactFlow, useStoreApi, type NodeProps } from "@xyflow/react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import type { FlowNode } from "../api/adapter";
 import type { NodeKind } from "../api/types";
+import { queueSkipNextDocFit } from "../lib/docFit";
 import { useDiagram } from "../store/useDiagram";
 
 /** Shape family per node kind. Everything else is CSS. */
@@ -100,13 +101,30 @@ function nodeColor(data: FlowNode["data"], diagramType?: string) {
   return undefined;
 }
 
-function ResizeCorners() {
+type ResizeCorner = "tl" | "tr" | "bl" | "br";
+
+const RESIZE_HANDLES: { key: ResizeCorner; sx: number; sy: number; cursor: string }[] = [
+  { key: "tl", sx: -1, sy: -1, cursor: "nwse-resize" },
+  { key: "tr", sx: 1, sy: -1, cursor: "nesw-resize" },
+  { key: "bl", sx: -1, sy: 1, cursor: "nesw-resize" },
+  { key: "br", sx: 1, sy: 1, cursor: "nwse-resize" },
+];
+
+const MIN_WIDTH = 48;
+const MIN_HEIGHT = 36;
+
+function ResizeCorners({ onStart }: { onStart: (handle: (typeof RESIZE_HANDLES)[number], event: ReactPointerEvent<HTMLElement>) => void }) {
   return (
     <>
-      <i className="node__corner node__corner--tl" />
-      <i className="node__corner node__corner--tr" />
-      <i className="node__corner node__corner--bl" />
-      <i className="node__corner node__corner--br" />
+      {RESIZE_HANDLES.map((handle) => (
+        <i
+          key={handle.key}
+          role="presentation"
+          className={`node__corner node__corner--${handle.key} nodrag`}
+          style={{ cursor: handle.cursor }}
+          onPointerDown={(event) => onStart(handle, event)}
+        />
+      ))}
     </>
   );
 }
@@ -134,6 +152,95 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(data.label);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { setNodes } = useReactFlow<FlowNode>();
+
+  // Live resize drag: size + position update straight through React Flow while
+  // the pointer moves, then land in the doc once on release (so edges and
+  // autosave see one clean change, exactly like a node drag).
+  const resizing = useRef<{
+    startX: number;
+    startY: number;
+    startW: number;
+    startH: number;
+    atX: number;
+    atY: number;
+    sx: number;
+    sy: number;
+    w: number;
+    h: number;
+  } | null>(null);
+
+  const finishResize = () => {
+    const drag = resizing.current;
+    resizing.current = null;
+    if (!drag) return;
+    queueSkipNextDocFit();
+    const current = useDiagram.getState().doc;
+    useDiagram.getState().setDoc(
+      {
+        ...current,
+        nodes: current.nodes.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                size: { width: Math.max(MIN_WIDTH, drag.w), height: Math.max(MIN_HEIGHT, drag.h) },
+              }
+            : n,
+        ),
+      },
+      { silent: true },
+    );
+  };
+
+  const beginResize = (handle: (typeof RESIZE_HANDLES)[number], event: ReactPointerEvent<HTMLElement>) => {
+    event.stopPropagation();
+    if (useDiagram.getState().busy) return;
+    const node = useDiagram.getState().doc.nodes.find((n) => n.id === id);
+    if (!node) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    resizing.current = {
+      startX,
+      startY,
+      startW: data.width,
+      startH: data.height,
+      atX: node.position.x,
+      atY: node.position.y,
+      sx: handle.sx,
+      sy: handle.sy,
+      w: data.width,
+      h: data.height,
+    };
+
+    const move = (pointer: PointerEvent) => {
+      pointer.preventDefault();
+      const drag = resizing.current;
+      if (!drag) return;
+      const zoom = useStoreApi().getState().transform[2] || 1;
+      const dx = (pointer.clientX - drag.startX) / zoom;
+      const dy = (pointer.clientY - drag.startY) / zoom;
+      const w = Math.max(MIN_WIDTH, Math.round(drag.startW + drag.sx * dx));
+      const h = Math.max(MIN_HEIGHT, Math.round(drag.startH + drag.sy * dy));
+      const px = drag.sx === -1 ? Math.round(drag.atX + (drag.startW - w)) : drag.atX;
+      const py = drag.sy === -1 ? Math.round(drag.atY + (drag.startH - h)) : drag.atY;
+      drag.w = w;
+      drag.h = h;
+      setNodes((nodes) =>
+        nodes.map((n) =>
+          n.id === id ? { ...n, position: { x: px, y: py }, data: { ...n.data, width: w, height: h } } : n,
+        ),
+      );
+    };
+
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      finishResize();
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   useEffect(() => {
     if (editing) {
@@ -189,7 +296,7 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
       )}
       <Handle type="source" position={Position.Right} className="node__port" />
       <Handle type="source" position={Position.Bottom} className="node__port" id="b" />
-      {selected && <ResizeCorners />}
+      {selected && <ResizeCorners onStart={beginResize} />}
     </div>
   );
 }
