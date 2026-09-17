@@ -1,5 +1,6 @@
 import { MarkerType, type Edge, type EdgeMarkerType, type Node } from "@xyflow/react";
 
+import { computeGroupRects, groupDepth } from "../lib/groupRects";
 import type {
   DiagramDoc,
   DiagramNode,
@@ -33,15 +34,26 @@ const CUSTOM_MARKER_ID: Partial<Record<EdgeArrow, string>> = {
  *  or a bare fragment id into our custom defs for circle/diamond — React Flow
  *  wraps a string marker in `url('#…')` itself, so passing an already-wrapped
  *  "url(#id)" here would double-wrap it into a dead reference — or undefined
- *  for no marker at all. */
+ *  for no marker at all.
+ *
+ *  `color` must never be left undefined here: React Flow's own Marker
+ *  component defaults an unset `color` prop to the *string* `'none'`, which
+ *  its symbol then spreads into `{ stroke: 'none', fill: 'none' }` — a
+ *  perfectly valid style that paints the whole arrowhead invisible. Every
+ *  edge without an explicit colour (the overwhelming majority — the model
+ *  essentially never sets one) hit exactly this, so the line was there but
+ *  its arrowhead silently wasn't. Falling back to the edge line's own colour
+ *  keeps the two in sync in both themes, the same as an uncoloured line does. */
 function markerFor(
   arrow: EdgeArrow,
   color: string | undefined,
 ): EdgeMarkerType | undefined {
+  const resolved = color ?? "var(--slate)";
   const customId = CUSTOM_MARKER_ID[arrow];
   if (customId) return customId;
-  if (arrow === "arrow") return { type: MarkerType.Arrow, width: 16, height: 16, color };
-  if (arrow === "triangle") return { type: MarkerType.ArrowClosed, width: 16, height: 16, color };
+  if (arrow === "arrow") return { type: MarkerType.Arrow, width: 16, height: 16, color: resolved };
+  if (arrow === "triangle")
+    return { type: MarkerType.ArrowClosed, width: 16, height: 16, color: resolved };
   return undefined;
 }
 
@@ -79,6 +91,7 @@ export interface FlowNodeData extends Record<string, unknown> {
   kind: NodeKind;
   description?: string | null;
   lane?: string | null;
+  group?: string | null;
   imageUrl?: string | null;
   /** Key into ICON_CATALOG — a small glyph drawn beside the label, the way a
    *  service/architecture diagram names what a box actually is. Unlike
@@ -96,9 +109,12 @@ export interface FlowNodeData extends Record<string, unknown> {
    *  bar's title field. */
   title?: string;
   summary?: string | null;
+  /** Only set on a synthetic "group" node — how deeply the container is
+   *  nested, which drives its tint so nesting reads at a glance. */
+  depth?: number;
 }
 
-export type FlowNode = Node<FlowNodeData, "diagram" | "lane" | "title">;
+export type FlowNode = Node<FlowNodeData, "diagram" | "lane" | "title" | "group">;
 
 /** doc -> React Flow. Lanes become non-interactive background bands. */
 export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
@@ -135,6 +151,39 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
       });
   }
 
+  // Containers, outermost first: React Flow paints in array order, and a
+  // nested box has to land on top of the one holding it. zIndex keeps the
+  // whole family under the content nodes regardless. Only the header strip is
+  // a drag handle — see `.group-box` in the stylesheet, whose body ignores
+  // pointer events so a large box never swallows clicks meant for its contents.
+  const depths = new Map(
+    (doc.groups ?? []).map((g) => [g.id, groupDepth(doc.groups ?? [], g.id)]),
+  );
+  for (const group of [...(doc.groups ?? [])]
+    .filter((g) => g.rect)
+    .sort((a, b) => (depths.get(a.id) ?? 0) - (depths.get(b.id) ?? 0))) {
+    const rect = group.rect!;
+    const depth = depths.get(group.id) ?? 0;
+    nodes.push({
+      id: `group__${group.id}`,
+      type: "group",
+      draggable: true,
+      dragHandle: ".group-box__header",
+      selectable: true,
+      focusable: false,
+      zIndex: -1000 + depth,
+      position: { x: rect.x, y: rect.y },
+      data: {
+        label: group.label,
+        kind: "note",
+        depth,
+        width: rect.width,
+        height: rect.height,
+      },
+      style: { width: rect.width, height: rect.height },
+    });
+  }
+
   for (const node of doc.nodes) {
     nodes.push({
       id: node.id,
@@ -146,6 +195,7 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
         kind: node.kind,
         description: node.description,
         lane: node.lane,
+        group: node.group,
         imageUrl: node.image_url,
         icon: node.icon,
         style: node.style,
@@ -161,8 +211,18 @@ export function toFlow(doc: DiagramDoc): { nodes: FlowNode[]; edges: Edge[] } {
   // or a lane band starting at y=0), pans and zooms with the diagram, and
   // exports with it since it's a real node, not an HTML overlay.
   if (doc.nodes.length > 0) {
-    const minX = Math.min(...doc.nodes.map((n) => n.position.x));
-    const minY = Math.min(0, ...doc.nodes.map((n) => n.position.y));
+    // Containers start above and left of their members, so the heading has to
+    // clear the outermost box's header strip, not just the topmost node.
+    const rects = (doc.groups ?? []).flatMap((g) => (g.rect ? [g.rect] : []));
+    const minX = Math.min(
+      ...doc.nodes.map((n) => n.position.x),
+      ...rects.map((r) => r.x),
+    );
+    const minY = Math.min(
+      0,
+      ...doc.nodes.map((n) => n.position.y),
+      ...rects.map((r) => r.y),
+    );
     nodes.push({
       id: "title__block",
       type: "title",
@@ -255,6 +315,7 @@ export function fromFlow(
         kind: n.data.kind,
         description: n.data.description ?? null,
         lane: n.data.lane ?? null,
+        group: n.data.group ?? null,
         position: positions.get(n.id) ?? { x: 0, y: 0 },
         size: { width: n.data.width, height: n.data.height },
       } as DiagramNode;
@@ -263,6 +324,9 @@ export function fromFlow(
   return {
     ...doc,
     nodes: nextNodes,
+    // Containers take their shape from what they hold, so a node that just
+    // moved has to regrow (or shrink) its box in the same commit.
+    groups: computeGroupRects({ ...doc, nodes: nextNodes }),
     edges: edges
       .filter((e) => live.has(e.source) && live.has(e.target))
       .map((e) => {

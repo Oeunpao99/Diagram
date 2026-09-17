@@ -4,14 +4,16 @@ import type { ReactNode } from "react";
 import { useDiagram } from "../store/useDiagram";
 import { DirectionMenu } from "./DirectionMenu";
 import { PageMenu } from "./PageMenu";
+import { ShapeMenu } from "./ShapeMenu";
+import { TemplateMenu } from "./TemplateMenu";
 import {
-  BoxIcon,
   GitBranch,
   ImageIcon,
   Layers,
   Maximize,
   MousePointer,
   Pan,
+  Pencil,
   Square,
   TypeIcon,
   ZoomIn,
@@ -23,8 +25,8 @@ export type Tool =
   | "hand"
   | "node"
   | "text"
-  | "shape"
   | "connector"
+  | "draw"
   | "image"
   | "group";
 
@@ -33,8 +35,11 @@ const TOOLS: { id: Tool; label: string; icon: () => ReactNode }[] = [
   { id: "hand", label: "Hand", icon: Pan },
   { id: "node", label: "Node", icon: Square },
   { id: "text", label: "Text", icon: TypeIcon },
-  { id: "shape", label: "Shape", icon: BoxIcon },
+];
+
+const TOOLS_AFTER_SHAPE: { id: Tool; label: string; icon: () => ReactNode }[] = [
   { id: "connector", label: "Connector", icon: GitBranch },
+  { id: "draw", label: "Draw", icon: Pencil },
   { id: "image", label: "Image", icon: ImageIcon },
   { id: "group", label: "Group", icon: Layers },
 ];
@@ -53,27 +58,35 @@ export function CanvasToolbar({
   const busy = useDiagram((s) => s.busy);
   const selectionCount = useDiagram((s) => s.selection.length);
 
+  const renderTool = (item: { id: Tool; label: string; icon: () => ReactNode }) => (
+    <button
+      key={item.id}
+      className={`group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5 ${tool === item.id ? "bg-green-soft text-green-deep" : ""}`}
+      onClick={() => onTool(item.id)}
+      title={item.id === "group" && selectionCount < 2 ? "Select 2+ nodes to group" : item.label}
+      aria-pressed={tool === item.id}
+      disabled={item.id === "group" && selectionCount < 2}
+    >
+      {item.icon()}
+      <span className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-20 -translate-x-1/2 -translate-y-0.5 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-on-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        {item.label}
+      </span>
+    </button>
+  );
+
   return (
     <div
       className="absolute left-1/2 top-[14px] z-[8] flex -translate-x-1/2 items-center gap-0.5 whitespace-nowrap rounded-[10px] border border-line bg-surface p-1 shadow-2"
       role="toolbar"
       aria-label="Canvas tools"
     >
-      {TOOLS.map((item) => (
-        <button
-          key={item.id}
-          className={`group relative inline-flex items-center gap-1.5 rounded-[7px] border-none bg-transparent px-[7px] py-[5px] text-[11.5px] font-[550] text-slate transition-[background,color] hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5 ${tool === item.id ? "bg-green-soft text-green-deep" : ""}`}
-          onClick={() => onTool(item.id)}
-          title={item.id === "group" && selectionCount < 2 ? "Select 2+ nodes to group" : item.label}
-          aria-pressed={tool === item.id}
-          disabled={item.id === "group" && selectionCount < 2}
-        >
-          {item.icon()}
-          <span className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] z-20 -translate-x-1/2 -translate-y-0.5 whitespace-nowrap rounded-md bg-ink px-2 py-1 text-[10.5px] font-medium text-on-ink opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-            {item.label}
-          </span>
-        </button>
-      ))}
+      {TOOLS.map(renderTool)}
+      {/* Not a click-to-arm tool like the rest of this row — a popover that
+          places (or drags out) a chosen shape immediately. Sits where a
+          single hard-coded "always insert a decision diamond" button used
+          to, now offering the full set every other drop target already has. */}
+      <ShapeMenu />
+      {TOOLS_AFTER_SHAPE.map(renderTool)}
 
       <div className="ml-1.5 flex items-center gap-0.5 border-l border-line pl-1.5 max-[900px]:hidden">
         <button
@@ -89,6 +102,7 @@ export function CanvasToolbar({
           </span>
         </button>
         <DirectionMenu />
+        <TemplateMenu />
         <PageMenu />
         <span className="mx-1 my-[3px] w-px self-stretch bg-line" />
         <div className="inline-flex items-center gap-px text-slate">

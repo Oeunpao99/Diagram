@@ -13,7 +13,17 @@ export type NodeKind =
   | "service"
   | "queue"
   | "cloud"
-  | "note";
+  | "note"
+  | "wedge"
+  | "hub"
+  | "circle"
+  | "hexagon"
+  | "octagon"
+  | "triangle"
+  | "pentagon"
+  | "star"
+  | "tag"
+  | "arrow";
 
 export type EdgeStyle = "solid" | "dashed" | "dotted" | "dashdot" | "longdash" | "animated";
 
@@ -33,7 +43,9 @@ export type DiagramType =
   | "er"
   | "data_flow"
   | "org_chart"
-  | "mind_map";
+  | "mind_map"
+  | "tree"
+  | "radial";
 
 export interface DiagramNode {
   id: string;
@@ -41,6 +53,7 @@ export interface DiagramNode {
   kind: NodeKind;
   description?: string | null;
   lane?: string | null;
+  group?: string | null;
   position: { x: number; y: number };
   size: { width: number; height: number };
   style?: Record<string, unknown>;
@@ -85,6 +98,24 @@ export interface Lane {
   color?: string | null;
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A nested container. Unlike a Lane (a flat band perpendicular to the flow),
+ *  a group nests to arbitrary depth via `parent` and takes its shape from what
+ *  it holds — `rect` is derived by the backend layout, never authored. */
+export interface Group {
+  id: string;
+  label: string;
+  parent?: string | null;
+  collapsed?: boolean;
+  rect?: Rect | null;
+}
+
 export interface DiagramDoc {
   title: string;
   diagram_type: DiagramType;
@@ -93,6 +124,7 @@ export interface DiagramDoc {
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   lanes: Lane[];
+  groups: Group[];
   meta: Record<string, unknown>;
 }
 
@@ -110,6 +142,7 @@ export interface ValidationReport {
   node_count: number;
   edge_count: number;
   lane_count: number;
+  group_count: number;
   issues: Issue[];
 }
 
@@ -166,6 +199,33 @@ export interface AgentResult {
   validation: ValidationReport | null;
 }
 
+/** One item of a live progress plan — see AgentStreamEvent below. */
+export interface AgentPlanStep {
+  id: string;
+  label: string;
+}
+
+/** One earlier line of the conversation, sent along with a new chat message
+ *  so a short reply ("all", "yes", "the second one") can resolve against
+ *  the agent's own previous question instead of it re-asking. */
+export interface ChatTurn {
+  role: "user" | "ai";
+  text: string;
+}
+
+/** One SSE event from the streaming /ai/agent/stream endpoint. `plan`
+ *  announces one or more steps that are now known — a run can send this
+ *  more than once (a layout step, say, only becomes knowable after the
+ *  tool calls it depends on have actually run), so steps accumulate rather
+ *  than replace. `step` reports that a given step id is done, with the real
+ *  text for it. `result` carries the full AgentResult and is the last real
+ *  event before the stream closes. */
+export type AgentStreamEvent =
+  | { type: "plan"; steps: AgentPlanStep[] }
+  | { type: "step"; id: string; label: string }
+  | { type: "result"; result: AgentResult }
+  | { type: "error"; message: string };
+
 export interface Template {
   id: string;
   name: string;
@@ -184,6 +244,7 @@ export const emptyDoc = (): DiagramDoc => ({
   nodes: [],
   edges: [],
   lanes: [],
+  groups: [],
   meta: {},
 });
 
@@ -200,6 +261,12 @@ export function normalizeDoc(raw: Partial<DiagramDoc>): DiagramDoc {
     direction: raw.direction ?? base.direction,
     summary: raw.summary ?? null,
     lanes: raw.lanes ?? [],
+    groups: (raw.groups ?? []).map((group) => ({
+      ...group,
+      parent: group.parent ?? null,
+      collapsed: group.collapsed ?? false,
+      rect: group.rect ?? null,
+    })),
     edges: (raw.edges ?? []).map((edge) => ({
       ...edge,
       label: edge.label ?? null,
@@ -222,6 +289,7 @@ export function normalizeDoc(raw: Partial<DiagramDoc>): DiagramDoc {
       size: node.size ?? { width: 180, height: 64 },
       description: node.description ?? null,
       lane: node.lane ?? null,
+      group: node.group ?? null,
       image_url: node.image_url ?? null,
       icon: node.icon ?? null,
       locked: node.locked ?? false,
@@ -237,7 +305,9 @@ export type Accent = "emerald" | "violet" | "blue" | "amber" | "rose";
 
 export interface User {
   id: string;
-  email: string;
+  // Null for a Telegram-only account — that provider never hands back an
+  // email address at all.
+  email: string | null;
   name: string;
   theme: Theme;
   accent: Accent;
@@ -247,6 +317,34 @@ export interface TokenResponse {
   access_token: string;
   token_type: string;
   user: User;
+}
+
+/** One line of the Copilot chat attached to a diagram — see useDiagram.ts's
+ *  `messages`. `id` is a client-generated key (never reconciled against the
+ *  server's own row id — nothing here edits or targets one message by id
+ *  after the fact, only appends and bulk-clears). `changes`/`warnings`
+ *  mirror a finished edit's checklist card so a restored message renders
+ *  the same way it did live, not as plain markdown bullets. */
+export interface ChatMessage {
+  id: string;
+  role: "user" | "ai";
+  text: string;
+  changes?: string[];
+  warnings?: string[];
+  created_at: string;
+}
+
+/** The Telegram Login Widget's callback payload, forwarded to the backend
+ *  as-is — every field here (plus `hash`) is part of what gets verified
+ *  server-side. See https://core.telegram.org/widgets/login */
+export interface TelegramAuthPayload {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
 }
 
 /* --- saved diagrams ------------------------------------------------------- */

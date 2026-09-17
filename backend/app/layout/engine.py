@@ -14,15 +14,36 @@ Swimlane mode replaces step 3/4: layer drives one axis, lane drives the other.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict, deque
 
-from app.schemas.diagram import DiagramDoc, Direction, Node, NodeKind, Position
+from app.schemas.diagram import DiagramDoc, Direction, Node, NodeKind, Position, Rect
 
 # Spacing, in px. Tuned for the default 196x70 node.
 LAYER_GAP = 130  # along the flow axis, between layers
 NODE_GAP = 54  # across the flow axis, between siblings
 LANE_PADDING = 44
 LANE_HEADER = 160  # room for the lane title strip
+# Nested containers. Published in doc.meta so the frontend reads these rather
+# than keeping its own copy — the lane_* keys below set the same precedent, and
+# it's what stops the two sides' padding maths from drifting apart.
+GROUP_PAD = 26  # between a container's border and what it holds
+GROUP_HEADER = 30  # the container's label strip, added above the contents
+# What React Flow's smoothstep stands off from a port before turning. Used to
+# reproduce the drawn path when checking what an edge runs over.
+PORT_STANDOFF = 20.0
+# Slack around a node box when asking "does this line run over it" — a line
+# grazing the border still reads as touching.
+CORRIDOR_PAD = 6.0
+
+# Radial ("circle diagram") layout. Gap between neighbouring wedges, in
+# degrees, and how far past the outer ring a wedge's label starts.
+RADIAL_GAP_DEG = 3.0
+RADIAL_LABEL_GAP = 26.0
+RADIAL_PALETTE = [
+    "#f4c53d", "#f0793a", "#d6469a", "#7b5fd6",
+    "#3fa9dc", "#2fb6a5", "#7ac943", "#e0574f",
+]
 
 DEFAULT_SIZES: dict[NodeKind, tuple[float, float]] = {
     NodeKind.start: (150, 60),
@@ -31,6 +52,12 @@ DEFAULT_SIZES: dict[NodeKind, tuple[float, float]] = {
     NodeKind.database: (184, 88),
     NodeKind.actor: (140, 96),
     NodeKind.note: (210, 88),
+    NodeKind.circle: (148, 148),
+    NodeKind.triangle: (160, 110),
+    NodeKind.pentagon: (160, 120),
+    NodeKind.star: (150, 150),
+    NodeKind.tag: (196, 84),
+    NodeKind.arrow: (196, 90),
 }
 
 
@@ -116,10 +143,34 @@ def _layer(node_ids: list[str], edges: list[tuple[str, str]]) -> dict[str, int]:
     return layer
 
 
+def _cluster_by_group(ids: list[str], group_of: dict[str, str]) -> None:
+    """Pull same-container nodes in a layer next to each other.
+
+    Barycentre ordering only looks at edges, so two nodes in the same subnet
+    that aren't directly connected can settle with a foreign node between them.
+    A container is drawn as the union of its members, so that foreign node then
+    renders *inside* a box it has nothing to do with. Sorting each group as a
+    block, anchored at the group's mean barycentre, keeps the ordering the
+    edges asked for while making each container contiguous.
+    """
+    rank = {n: i for i, n in enumerate(ids)}
+    total: dict[str, float] = defaultdict(float)
+    count: dict[str, int] = defaultdict(int)
+    for n in ids:
+        g = group_of.get(n)
+        if g:
+            total[g] += rank[n]
+            count[g] += 1
+    mean = {g: total[g] / count[g] for g in count}
+    # An ungrouped node anchors on itself, so it keeps its barycentre slot.
+    ids.sort(key=lambda n: (mean.get(group_of.get(n, ""), rank[n]), group_of.get(n, ""), rank[n]))
+
+
 def _order(
     layers: dict[int, list[str]],
     edges: list[tuple[str, str]],
     sweeps: int = 4,
+    group_of: dict[str, str] | None = None,
 ) -> None:
     """Barycenter ordering — the cheap, effective fix for crossing connectors."""
     preds: dict[str, list[str]] = defaultdict(list)
@@ -144,6 +195,8 @@ def _order(
                 return sum(vals) / len(vals) if vals else float(current[node])
 
             layers[depth].sort(key=bary)
+            if group_of:
+                _cluster_by_group(layers[depth], group_of)
 
 
 def apply_layout(
@@ -173,7 +226,7 @@ def apply_layout(
         doc.meta["page_width"] = float(width or 0)
         doc.meta["page_height"] = float(height or 0)
     else:
-        for key in ("page_x", "page_y", "page_width", "page_height"):
+        for key in ("page_x", "page_y", "page_width", "page_height", "fit_scale"):
             doc.meta.pop(key, None)
 
     node_ids = [n.id for n in doc.nodes]
@@ -186,7 +239,11 @@ def apply_layout(
         layers[depth_of[node_id]].append(node_id)
     _route_edges(doc, depth_of)
 
-    if algorithm == "swimlane" and doc.lanes:
+    if algorithm == "radial":
+        _place_radial(doc)
+        if target:
+            _fit_to_box(doc, width or 0, height or 0)
+    elif algorithm == "swimlane" and doc.lanes:
         _place_swimlane(doc, layers, direction)
         if target:
             _fit_to_box(doc, width or 0, height or 0)
@@ -195,8 +252,13 @@ def apply_layout(
         if target:
             _fit_to_box(doc, width or 0, height or 0)
     else:
-        _order(layers, edges)
+        _order(layers, edges, group_of={n.id: n.group for n in doc.nodes if n.group})
         _place_layered(doc, layers, direction, width if target else None, height if target else None)
+
+    # Runs last, on final coordinates — after fit-to-box and after the
+    # RL/BT mirror, both of which move nodes out from under their edges.
+    _reroute_crossing_edges(doc)
+    _place_groups(doc)
 
     if target:
         doc.meta["page_x"] = 0.0
@@ -205,16 +267,23 @@ def apply_layout(
 
 
 def _route_edges(doc: DiagramDoc, depth_of: dict[str, int]) -> None:
-    """Keep back/lateral edges out of the main flow's corridor.
+    """Keep back/lateral and layer-skipping edges out of the main corridor.
 
     Every edge defaults to the same pair of ports — right side out, left side
-    in — because that's what a *forward* edge along the flow axis wants. A
-    decision's rejection branch, a hand-off back to an earlier step, a retry
-    loop — anything that doesn't advance to a later layer — wants that same
-    pair too, so it ends up riding the exact same corridor as the forward
-    flow and visually fuses with it (or with every other such edge). Routing
-    it through the node's top/bottom ports instead — unused by the forward
-    flow, which stays on left/right — gives it its own lane.
+    in — because that's what an edge to the *very next* layer wants. Two
+    kinds of edge get hurt by that default:
+
+    * Anything that doesn't advance (a decision's rejection branch, a
+      hand-off back to an earlier step, a retry loop) rides the exact same
+      corridor as the forward flow and visually fuses with it.
+    * A forward edge that *skips* layers — a fast path, a cancel, an
+      escalation — has to cross every layer in between, and the straight
+      right-to-left run puts it directly over whatever nodes sit there.
+
+    Both want the node's top/bottom ports instead, which the layer-to-layer
+    flow never uses, so they get their own lane clear of it. An edge to the
+    adjacent layer keeps left/right: there is nothing between its endpoints
+    to collide with, and it *is* the main flow.
 
     Only touches edges that have never had a handle chosen (by a user's
     manual drag, or by an earlier run of this same step) — a deliberate
@@ -225,11 +294,89 @@ def _route_edges(doc: DiagramDoc, depth_of: dict[str, int]) -> None:
         t_depth = depth_of.get(edge.target)
         if s_depth is None or t_depth is None:
             continue
-        forward = t_depth > s_depth
-        if forward or edge.source_handle is not None or edge.target_handle is not None:
+        stays_in_corridor = t_depth == s_depth + 1
+        if stays_in_corridor or edge.source_handle is not None or edge.target_handle is not None:
             continue
         edge.source_handle = "b"
         edge.target_handle = "t"
+
+
+def _corridor(source: Node, target: Node, source_handle: str | None, target_handle: str | None):
+    """The polyline the canvas actually draws between two ports.
+
+    Ports are fixed sides regardless of flow direction (see nodes.tsx): a
+    source leaves right, or bottom for "b"; a target is entered from the
+    left, or the top for "t". Smoothstep then turns at right angles — the
+    default pair turns on a vertical at the midpoint between them, the
+    top/bottom pair runs horizontally clear of both boxes.
+    """
+    if source_handle is None and target_handle is None:
+        p0 = (source.position.x + source.size.width, source.position.y + source.size.height / 2)
+        p1 = (target.position.x, target.position.y + target.size.height / 2)
+        mid_x = (p0[0] + p1[0]) / 2
+        return [p0, (mid_x, p0[1]), (mid_x, p1[1]), p1]
+
+    p0 = (source.position.x + source.size.width / 2, source.position.y + source.size.height)
+    p1 = (target.position.x + target.size.width / 2, target.position.y)
+    run_y = max(p0[1], p1[1]) + PORT_STANDOFF
+    return [p0, (p0[0], run_y), (p1[0], run_y), p1]
+
+
+def _crossings(points, nodes: list[Node], skip: set[str]) -> int:
+    """How many unrelated node boxes that polyline runs over.
+
+    Every segment is axis-aligned, so overlapping the segment's bounding box
+    with the (padded) node box is exact, not an approximation.
+    """
+    hits = 0
+    for node in nodes:
+        if node.id in skip:
+            continue
+        bx = node.position.x - CORRIDOR_PAD
+        by = node.position.y - CORRIDOR_PAD
+        bw = node.size.width + CORRIDOR_PAD * 2
+        bh = node.size.height + CORRIDOR_PAD * 2
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            lo_x, hi_x = (x0, x1) if x0 <= x1 else (x1, x0)
+            lo_y, hi_y = (y0, y1) if y0 <= y1 else (y1, y0)
+            if lo_x <= bx + bw and hi_x >= bx and lo_y <= by + bh and hi_y >= by:
+                hits += 1
+                break
+    return hits
+
+
+def _reroute_crossing_edges(doc: DiagramDoc) -> None:
+    """Last pass, once every node has its final position: move an edge off
+    the default ports when the line that draws would run over nodes it has
+    nothing to do with.
+
+    `_route_edges` already catches the cases predictable from layer distance
+    alone, but it has to run *before* placement, so it can't see the one that
+    actually dominates a busy swimlane: two nodes sharing a layer *and* a
+    lane sit side by side on the flow axis at the same cross position, so any
+    edge passing that lane at that height is drawn straight through whichever
+    of them sits in between. Only real coordinates show that.
+
+    Switches only when the top/bottom pair is genuinely better — on a dense
+    diagram the alternative route can be just as blocked, and a lateral move
+    that doesn't help isn't worth undoing the tidy left-to-right default for.
+    Handles chosen by hand are left alone, same as everywhere else.
+    """
+    for edge in doc.edges:
+        if edge.source_handle is not None or edge.target_handle is not None:
+            continue
+        source = next((n for n in doc.nodes if n.id == edge.source), None)
+        target = next((n for n in doc.nodes if n.id == edge.target), None)
+        if source is None or target is None:
+            continue
+
+        skip = {edge.source, edge.target}
+        blocked = _crossings(_corridor(source, target, None, None), doc.nodes, skip)
+        if not blocked:
+            continue
+        if _crossings(_corridor(source, target, "b", "t"), doc.nodes, skip) < blocked:
+            edge.source_handle = "b"
+            edge.target_handle = "t"
 
 
 def _place_layered(
@@ -247,31 +394,36 @@ def _place_layered(
         d: max(by_id[n].size.width if horizontal else by_id[n].size.height for n in ids)
         for d, ids in layers.items()
     }
-    # Cross-axis length of each layer, so layers can be centred against each other.
-    cross_len = {
-        d: sum((by_id[n].size.height if horizontal else by_id[n].size.width) for n in ids)
-        + NODE_GAP * (len(ids) - 1)
+    # Cross-axis length of each layer, so layers can be centred against each
+    # other. Group-aware: neighbours in different containers need room for the
+    # borders drawn between them.
+    group_of = {n.id: n.group for n in doc.nodes if n.group}
+    chains = _group_ancestors(doc)
+    spans = {
+        d: _cross_offsets(ids, by_id, group_of, chains, horizontal)
         for d, ids in layers.items()
     }
+    cross_len = {d: span[1] for d, span in spans.items()}
 
     if width is not None and height is not None:
-        _place_layered_fit(doc, layers, by_id, layer_extent, cross_len, direction, width, height)
+        depth_of = {nid: d for d, ids in layers.items() for nid in ids}
+        no_break = _group_layer_spans(depth_of, group_of)
+        _place_layered_fit(doc, layers, by_id, layer_extent, spans, direction, width, height, no_break)
     else:
         widest = max(cross_len.values()) if cross_len else 0
         flow = 0.0
         for depth in sorted(layers):
             ids = layers[depth]
-            cross = (widest - cross_len[depth]) / 2
-            for node_id in ids:
+            offsets, _ = spans[depth]
+            base = (widest - cross_len[depth]) / 2
+            for node_id, offset in zip(ids, offsets):
                 node = by_id[node_id]
                 if horizontal:
                     node.position.x = flow
-                    node.position.y = cross
-                    cross += node.size.height + NODE_GAP
+                    node.position.y = base + offset
                 else:
-                    node.position.x = cross
+                    node.position.x = base + offset
                     node.position.y = flow
-                    cross += node.size.width + NODE_GAP
             flow += layer_extent[depth] + LAYER_GAP
 
     if direction in (Direction.RL, Direction.BT):
@@ -281,15 +433,43 @@ def _place_layered(
         _fit_to_box(doc, width, height)
 
 
+def _group_layer_spans(depth_of: dict[str, int], group_of: dict[str, str]) -> set[int]:
+    """Layer depths a chunk-wrap boundary must not fall on.
+
+    A group's own layer span (the min through max depth its members occupy)
+    has to land in one wrapped row, or the rect drawn around it — a union of
+    wherever its members ended up — spans two rows and swallows whatever the
+    wrap placed between them. Spans that share a depth are merged first: if
+    group A's members sit at layers 2 and 4, group B's node at layer 3 is
+    already forced to travel with A regardless of B's own span, so keeping
+    that consistent needs B's whole span pulled in too.
+    """
+    per_group: dict[str, list[int]] = defaultdict(list)
+    for node_id, group_id in group_of.items():
+        if node_id in depth_of:
+            per_group[group_id].append(depth_of[node_id])
+
+    spans = sorted([min(ds), max(ds)] for ds in per_group.values() if ds)
+    merged: list[list[int]] = []
+    for span in spans:
+        if merged and span[0] <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], span[1])
+        else:
+            merged.append(span)
+
+    return {d for start, end in merged for d in range(start + 1, end + 1)}
+
+
 def _place_layered_fit(
     doc: DiagramDoc,
     layers: dict[int, list[str]],
     by_id: dict[str, Node],
     layer_extent: dict[int, float],
-    cross_len: dict[int, float],
+    spans: dict[int, tuple[list[float], float]],
     direction: Direction,
     width: float,
     height: float,
+    no_break: set[int] = frozenset(),
 ) -> None:
     """Layered placement constrained to a page box.
 
@@ -298,20 +478,31 @@ def _place_layered_fit(
     the layer sequence is broken into *chunks*: consecutive layers still stack
     along the flow axis inside a chunk, and the chunks themselves stack along
     the cross axis — a flow that "wraps" like text to stay inside the box.
+
+    `spans` carries the same group-aware per-node offsets the free-form path
+    uses (`_cross_offsets`) — without them, two nodes in different containers
+    land exactly NODE_GAP apart regardless of the boundary between them, and
+    the container rects drawn around them (sized separately, with that
+    boundary's padding) end up overlapping. `no_break` (from
+    `_group_layer_spans`) is the depths where wrapping anyway would tear a
+    single group across two rows for the same reason.
     """
+    cross_len = {d: span[1] for d, span in spans.items()}
     horizontal = direction in (Direction.LR, Direction.RL)
     flow_limit = width if horizontal else height
     layer_ids = sorted(layers)
 
     # Greedy wrap: keep adding layers to the current chunk until the next one
-    # would push the chunk past the flow limit.
+    # would push the chunk past the flow limit — unless breaking here would
+    # split a group's own layer span, in which case the chunk is let to run
+    # over rather than tear a container in two.
     chunks: list[list[int]] = []
     current: list[int] = []
     current_flow = 0.0
     for depth in layer_ids:
         ext = layer_extent[depth]
         nxt = current_flow + (LAYER_GAP if current else 0) + ext
-        if current and nxt > flow_limit:
+        if current and nxt > flow_limit and depth not in no_break:
             chunks.append(current)
             current = [depth]
             current_flow = ext
@@ -334,27 +525,37 @@ def _place_layered_fit(
         flow = 0.0
         for depth in chunk:
             ids = layers[depth]
-            cross = cross_cursor + (chunk_cross_extent - cross_len[depth]) / 2
-            for node_id in ids:
+            offsets, _ = spans[depth]
+            base = cross_cursor + (chunk_cross_extent - cross_len[depth]) / 2
+            for node_id, offset in zip(ids, offsets):
                 node = by_id[node_id]
                 if horizontal:
                     node.position.x = flow
-                    node.position.y = cross
-                    cross += node.size.height + NODE_GAP
+                    node.position.y = base + offset
                 else:
-                    node.position.x = cross
+                    node.position.x = base + offset
                     node.position.y = flow
-                    cross += node.size.width + NODE_GAP
             flow += layer_extent[depth] + LAYER_GAP
         cross_cursor += chunk_cross_extent + NODE_GAP
 
 
 def _fit_to_box(doc: DiagramDoc, width: float, height: float) -> None:
-    """Shrink (never stretch) node positions and centre them inside the box.
+    """Shrink (never stretch) the graph — positions and node sizes both — to
+    centre it inside the box.
 
-    Only coordinates are touched — node boxes keep their real sizes, so the
-    graph always fits the target page while staying readable.
+    Positions and sizes shrink by the same factor, which is what makes this
+    safe: scaling position alone while leaving boxes full-size is what used
+    to produce overlap, since the pre-fit layout only ever guaranteed enough
+    room between two node *positions*, not between two node *edges* once
+    their boxes stayed full-size against a compressed gap — any scale below
+    roughly size/(size+gap) put adjacent boxes on top of each other. A
+    uniform scale preserves the pre-fit layout's own overlap-free spacing
+    exactly, the same way shrinking an image never tears it. The applied
+    scale is published as `meta.fit_scale` — `_place_groups` runs after this
+    and needs it too, to keep its own padding proportional to the same
+    compressed graph rather than drawing full-size padding around it.
     """
+    doc.meta.pop("fit_scale", None)
     if not doc.nodes:
         return
     min_x = min(n.position.x for n in doc.nodes)
@@ -368,9 +569,12 @@ def _fit_to_box(doc: DiagramDoc, width: float, height: float) -> None:
 
     scale = min(1.0, width / graph_w, height / graph_h)
     if scale < 1.0:
+        doc.meta["fit_scale"] = scale
         for node in doc.nodes:
             node.position.x *= scale
             node.position.y *= scale
+            node.size.width *= scale
+            node.size.height *= scale
         min_x *= scale
         min_y *= scale
         graph_w *= scale
@@ -437,6 +641,252 @@ def _place_grid(doc: DiagramDoc) -> None:
     for i, node in enumerate(doc.nodes):
         node.position.x = (i % cols) * col_w
         node.position.y = (i // cols) * row_h
+
+
+def _arc_points(cx: float, cy: float, start: float, end: float, radius: float) -> list[tuple[float, float]]:
+    """Sampled points along an arc — used to bound a wedge's box without
+    assuming the box's tightest corners sit at the slice's start/end angles
+    (they don't, once a slice bulges past either sample toward the arc's
+    midpoint)."""
+    steps = 6
+    return [
+        (
+            cx + math.cos(math.radians(start + (end - start) * i / steps)) * radius,
+            cy + math.sin(math.radians(start + (end - start) * i / steps)) * radius,
+        )
+        for i in range(steps + 1)
+    ]
+
+
+def _place_radial(doc: DiagramDoc) -> None:
+    """Arrange every `wedge` node as an equal slice of a ring, with an
+    optional `hub` node centred in the hole.
+
+    Unlike every other placement here, a wedge isn't a rectangle — so instead
+    of a box *being* the shape, each wedge's `position`/`size` is just the
+    tight bounding box around that one slice plus its label, and the actual
+    polar geometry (angles, radii, the shared wheel centre) goes to `style`
+    for the frontend to draw the real SVG arc from. Kept out of `_sizes()`
+    because nothing about a wedge's box follows from its label length.
+    """
+    wedges = [n for n in doc.nodes if n.kind == NodeKind.wedge]
+    if not wedges:
+        return
+    hub = next((n for n in doc.nodes if n.kind == NodeKind.hub), None)
+
+    count = len(wedges)
+    outer_r = max(220.0, 40.0 + count * 26.0)
+    inner_r = outer_r * 0.5
+    label_r = outer_r + RADIAL_LABEL_GAP
+    slice_deg = (360.0 - count * RADIAL_GAP_DEG) / count
+
+    # A wheel this size, centred with enough clearance on every side for a
+    # label swinging out to label_r at any angle.
+    half = label_r + 160.0
+    cx, cy = half, half
+
+    for i, node in enumerate(wedges):
+        start = -90.0 + i * (slice_deg + RADIAL_GAP_DEG)
+        end = start + slice_deg
+        mid = math.radians((start + end) / 2.0)
+        on_right = math.cos(mid) >= 0
+
+        # Dragging one wedge would desync it from the ring everything else on
+        # this wheel is drawn relative to — there's nowhere sane for a wedge
+        # to move to on its own.
+        node.locked = True
+
+        if node.style.get("color") is None:
+            node.style["color"] = RADIAL_PALETTE[i % len(RADIAL_PALETTE)]
+        node.style.update(
+            {
+                "shape": "wedge",
+                "startAngle": start,
+                "endAngle": end,
+                "innerRadius": inner_r,
+                "outerRadius": outer_r,
+                "labelRadius": label_r,
+                "labelSide": "right" if on_right else "left",
+            }
+        )
+
+        label_w = max(90.0, min(220.0, 20.0 + len(node.label) * 7.2))
+        label_h = 40.0 if node.description else 22.0
+        label_x = cx + math.cos(mid) * label_r
+        label_y = cy + math.sin(mid) * label_r
+        label_x0 = label_x if on_right else label_x - label_w
+
+        points = (
+            _arc_points(cx, cy, start, end, outer_r)
+            + _arc_points(cx, cy, start, end, inner_r)
+            + [(label_x0, label_y - label_h / 2), (label_x0 + label_w, label_y + label_h / 2)]
+        )
+        min_x = min(p[0] for p in points)
+        min_y = min(p[1] for p in points)
+        max_x = max(p[0] for p in points)
+        max_y = max(p[1] for p in points)
+
+        node.position.x = min_x
+        node.position.y = min_y
+        node.size.width = max_x - min_x
+        node.size.height = max_y - min_y
+        node.style["centerX"] = cx - min_x
+        node.style["centerY"] = cy - min_y
+
+    if hub is not None:
+        hub_r = max(70.0, inner_r - 30.0)
+        hub.position.x = cx - hub_r
+        hub.position.y = cy - hub_r
+        hub.size.width = hub_r * 2
+        hub.size.height = hub_r * 2
+        hub.locked = True
+
+
+def _group_ancestors(doc: DiagramDoc) -> dict[str, list[str]]:
+    """Every group's own id followed by its ancestors, outermost last."""
+    parent = _group_parents(doc)
+    chains: dict[str, list[str]] = {}
+    for gid in parent:
+        chain, cursor = [gid], parent[gid]
+        while cursor is not None:
+            chain.append(cursor)
+            cursor = parent.get(cursor)
+        chains[gid] = chain
+    return chains
+
+
+def _group_gap(
+    a: str | None,
+    b: str | None,
+    chains: dict[str, list[str]],
+    horizontal: bool,
+) -> float:
+    """Extra cross-axis room needed between two neighbouring nodes.
+
+    NODE_GAP alone assumes nothing is drawn between two siblings. When they sit
+    in different containers there are borders in between, each wanting its own
+    padding, and each container entered also wants room for its header strip —
+    without this two adjacent subnets are drawn overlapping each other.
+    """
+    if a == b:
+        return 0.0
+    up = [g for g in chains.get(a or "", []) if g not in chains.get(b or "", [])]
+    down = [g for g in chains.get(b or "", []) if g not in chains.get(a or "", [])]
+    # The header sits above the contents, so it only eats cross-axis room when
+    # the cross axis *is* y — i.e. when the flow runs horizontally.
+    return (len(up) + len(down)) * GROUP_PAD + (len(down) * GROUP_HEADER if horizontal else 0.0)
+
+
+def _cross_offsets(
+    ids: list[str],
+    by_id: dict[str, Node],
+    group_of: dict[str, str],
+    chains: dict[str, list[str]],
+    horizontal: bool,
+) -> tuple[list[float], float]:
+    """Cross-axis offset of each node in a layer, and the layer's total length.
+
+    With no groups in play this is exactly the old
+    `sum(sizes) + NODE_GAP * (n - 1)`, so ungrouped diagrams lay out unchanged.
+    """
+    offsets: list[float] = []
+    cursor = 0.0
+    prev: str | None = None
+    for nid in ids:
+        if prev is not None:
+            cursor += NODE_GAP + _group_gap(
+                group_of.get(prev), group_of.get(nid), chains, horizontal
+            )
+        offsets.append(cursor)
+        cursor += by_id[nid].size.height if horizontal else by_id[nid].size.width
+        prev = nid
+    return offsets, cursor
+
+
+def _group_parents(doc: DiagramDoc) -> dict[str, str | None]:
+    """Each group's parent, with dangling references and cycles broken.
+
+    The validator reports both, but layout has to survive them on its own: this
+    runs on whatever the model just produced, which hasn't necessarily been
+    validated, and a parent cycle would otherwise recurse forever.
+    """
+    known = {g.id for g in doc.groups}
+    parent: dict[str, str | None] = {
+        g.id: (g.parent if g.parent in known and g.parent != g.id else None) for g in doc.groups
+    }
+    for gid in list(parent):
+        seen = {gid}
+        cursor = parent[gid]
+        while cursor is not None:
+            if cursor in seen:
+                parent[gid] = None  # cycle — promote this one to top level
+                break
+            seen.add(cursor)
+            cursor = parent.get(cursor)
+    return parent
+
+
+def _place_groups(doc: DiagramDoc) -> None:
+    """Size every container to whatever it holds.
+
+    Bottom-up: a group's rect is the union of its member nodes and its
+    already-sized child groups, padded, with a header strip on top. A group
+    holding nothing gets no rect at all — an empty container has no natural
+    size, and drawing a placeholder for one just leaves a stray box behind.
+    """
+    if not doc.groups:
+        for key in ("group_pad", "group_header"):
+            doc.meta.pop(key, None)
+        return
+
+    # A page-fit pass shrinks node *positions* only (box sizes stay real, for
+    # readability) — so the gap between two nodes in different containers
+    # shrinks by the same factor. Padding has to follow, or it stops fitting
+    # inside that shrunk gap and pushes sibling containers into each other.
+    scale = float(doc.meta.get("fit_scale", 1.0))
+    pad = GROUP_PAD * scale
+    header = GROUP_HEADER * scale
+
+    parent = _group_parents(doc)
+    depth: dict[str, int] = {}
+    for gid in parent:
+        d, cursor = 0, parent[gid]
+        while cursor is not None:
+            d += 1
+            cursor = parent.get(cursor)
+        depth[gid] = d
+
+    members: dict[str, list[Node]] = defaultdict(list)
+    for node in doc.nodes:
+        if node.group in parent:
+            members[node.group or ""].append(node)
+    children: dict[str, list[str]] = defaultdict(list)
+    for gid, pid in parent.items():
+        if pid is not None:
+            children[pid].append(gid)
+
+    by_id = {g.id: g for g in doc.groups}
+    for gid in sorted(parent, key=lambda g: depth[g], reverse=True):
+        boxes = [
+            (n.position.x, n.position.y, n.position.x + n.size.width, n.position.y + n.size.height)
+            for n in members[gid]
+        ]
+        boxes += [
+            (r.x, r.y, r.x + r.width, r.y + r.height)
+            for r in (by_id[c].rect for c in children[gid])
+            if r is not None
+        ]
+        if not boxes:
+            by_id[gid].rect = None
+            continue
+        x1 = min(b[0] for b in boxes) - pad
+        y1 = min(b[1] for b in boxes) - pad - header
+        x2 = max(b[2] for b in boxes) + pad
+        y2 = max(b[3] for b in boxes) + pad
+        by_id[gid].rect = Rect(x=x1, y=y1, width=x2 - x1, height=y2 - y1)
+
+    doc.meta["group_pad"] = pad
+    doc.meta["group_header"] = header
 
 
 def _mirror(doc: DiagramDoc, horizontal: bool) -> None:
@@ -517,3 +967,31 @@ def place_new_nodes(doc: DiagramDoc, new_ids: set[str]) -> None:
         base_y = max((n.position.y for n in others), default=0.0)
         for i, node in enumerate(pending):
             node.position = Position(x=base_x + dx, y=base_y + dy + i * SIBLING_GAP)
+
+    _clamp_into_groups(doc, new_ids)
+    _place_groups(doc)
+
+
+def _clamp_into_groups(doc: DiagramDoc, new_ids: set[str]) -> None:
+    """Pull a newly added node back inside the container it was added to.
+
+    The anchoring above steps one hop along the flow from a neighbour, which
+    routinely overshoots the group the node was meant to join. Because a
+    group's rect is the union of its members, one stray node would drag the
+    container — and every ancestor above it — out with it.
+    """
+    by_id = {g.id: g for g in doc.groups}
+    for node in doc.nodes:
+        if node.id not in new_ids or not node.group:
+            continue
+        group = by_id.get(node.group)
+        if group is None or group.rect is None:
+            continue
+        r = group.rect
+        left = r.x + GROUP_PAD
+        top = r.y + GROUP_PAD + GROUP_HEADER
+        # max() guards a container currently narrower than the node itself:
+        # clamping still lands it on the inner edge, and _place_groups then
+        # grows the rect by exactly the overflow.
+        node.position.x = min(max(node.position.x, left), max(left, r.x + r.width - GROUP_PAD - node.size.width))
+        node.position.y = min(max(node.position.y, top), max(top, r.y + r.height - GROUP_PAD - node.size.height))

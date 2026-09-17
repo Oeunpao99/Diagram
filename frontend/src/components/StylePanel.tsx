@@ -1,5 +1,6 @@
 import type { NodeKind } from "../api/types";
-import { Check, Copy, LinkIcon, Pencil, Trash, X } from "./icons";
+import { FONT_FAMILIES, type TextFormat } from "../lib/textFormat";
+import { AlignCenter, AlignLeft, AlignRight, Check, Copy, LinkIcon, Pencil, Trash, X } from "./icons";
 import { NODE_COLORS } from "./nodes";
 
 export interface StylePanelProps {
@@ -8,6 +9,8 @@ export interface StylePanelProps {
   lineStyle: "solid" | "dashed" | "dotted";
   opacity: number;
   fontSize: number | null;
+  titleFormat: TextFormat;
+  descFormat: TextFormat;
   onEdit: () => void;
   onDuplicate: () => void;
   onConnect: () => void;
@@ -18,6 +21,8 @@ export interface StylePanelProps {
   onSetLineStyle: (style: "solid" | "dashed" | "dotted") => void;
   onSetOpacity: (opacity: number) => void;
   onSetFontSize: (size: number | null) => void;
+  onSetTitleFormat: (patch: Partial<TextFormat>) => void;
+  onSetDescFormat: (patch: Partial<TextFormat>) => void;
 }
 
 const SHAPES: { kind: NodeKind; label: string }[] = [
@@ -26,10 +31,22 @@ const SHAPES: { kind: NodeKind; label: string }[] = [
   { kind: "document", label: "Document" },
   { kind: "data", label: "Data" },
   { kind: "database", label: "Database" },
+  { kind: "queue", label: "Queue" },
   { kind: "start", label: "Start" },
+  { kind: "end", label: "End" },
+  { kind: "actor", label: "Actor" },
+  { kind: "service", label: "Service" },
+  { kind: "system", label: "System" },
   { kind: "cloud", label: "Cloud" },
   { kind: "note", label: "Note" },
-  { kind: "actor", label: "Actor" },
+  { kind: "circle", label: "Circle" },
+  { kind: "hexagon", label: "Hexagon" },
+  { kind: "octagon", label: "Octagon" },
+  { kind: "triangle", label: "Triangle" },
+  { kind: "pentagon", label: "Pentagon" },
+  { kind: "star", label: "Star" },
+  { kind: "tag", label: "Tag" },
+  { kind: "arrow", label: "Arrow" },
 ];
 
 function ShapeGlyph({ kind }: { kind: NodeKind }) {
@@ -99,6 +116,71 @@ function ShapeGlyph({ kind }: { kind: NodeKind }) {
           <path d="M5 20a7 7 0 0 1 14 0" />
         </svg>
       );
+    case "queue":
+      return (
+        <svg {...common}>
+          <rect x="3" y="7" width="18" height="10" rx="5" />
+          <path d="M9 7v10M15 7v10" />
+        </svg>
+      );
+    case "circle":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8.5" />
+        </svg>
+      );
+    case "hexagon":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5 19.2 8v8L12 20.5 4.8 16V8L12 3.5Z" />
+        </svg>
+      );
+    case "octagon":
+      return (
+        <svg {...common}>
+          <path d="M8.3 3.5h7.4L20.5 8.3v7.4L15.7 20.5H8.3L3.5 15.7V8.3L8.3 3.5Z" />
+        </svg>
+      );
+    case "triangle":
+      return (
+        <svg {...common}>
+          <path d="M12 4.5 21 19.5H3L12 4.5Z" />
+        </svg>
+      );
+    case "pentagon":
+      return (
+        <svg {...common}>
+          <path d="M12 3.5 20.5 9.5 17.2 20H6.8L3.5 9.5 12 3.5Z" />
+        </svg>
+      );
+    case "star":
+      return (
+        <svg {...common}>
+          <path d="m12 3 2.7 5.9 6.3.6-4.7 4.3 1.3 6.2L12 16.9l-5.6 3.1 1.3-6.2L3 9.5l6.3-.6Z" />
+        </svg>
+      );
+    case "tag":
+      return (
+        <svg {...common}>
+          <path d="M3 4h11l6 8-6 8H3Z" />
+          <circle cx="6.5" cy="12" r="1.3" />
+        </svg>
+      );
+    case "arrow":
+      return (
+        <svg {...common}>
+          <path d="M3 7h11l7 5-7 5H3Z" />
+        </svg>
+      );
+    case "service":
+    case "system":
+      return (
+        <svg {...common}>
+          <rect x="7" y="5" width="14" height="14" rx="2" />
+          <rect x="3" y="8" width="5" height="3" rx="1" />
+          <rect x="3" y="14" width="5" height="3" rx="1" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>
@@ -159,6 +241,159 @@ function Section({
   );
 }
 
+const TOGGLE_BTN =
+  "grid h-7 w-7 place-items-center rounded-md border text-[12px] font-[700] transition-colors [&_svg]:size-3.5";
+const TOGGLE_ON = "border-green-line bg-green-soft text-green-strong";
+const TOGGLE_OFF = "border-line text-slate hover:bg-paper hover:text-ink";
+
+/** A field's own colour override: a checkbox that turns it on/off plus the
+ *  same raw `<input type="color">` swatch the Color section above already
+ *  uses — unchecked clears the key entirely rather than storing a colour
+ *  nobody asked to apply. */
+function ColorField({
+  label,
+  value,
+  fallback,
+  onChange,
+}: {
+  label: string;
+  value: string | undefined;
+  fallback: string;
+  onChange: (next: string | undefined) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 py-1 text-[11.5px] font-[550] text-slate">
+      <input
+        type="checkbox"
+        checked={value !== undefined}
+        onChange={(event) => onChange(event.target.checked ? fallback : undefined)}
+      />
+      <span className="flex-1">{label}</span>
+      {value !== undefined && (
+        <input
+          type="color"
+          className="color-custom__input"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={label}
+        />
+      )}
+    </label>
+  );
+}
+
+/** Rich formatting for one piece of wedge/hub text — everything in the
+ *  reference screenshot that's actually worth the wiring: font, weight/
+ *  style/decoration, size, alignment, and three independent colour
+ *  overrides (text, a background chip, a border around that chip). */
+function TextFormatSection({
+  title,
+  value,
+  onChange,
+}: {
+  title: string;
+  value: TextFormat;
+  onChange: (patch: Partial<TextFormat>) => void;
+}) {
+  return (
+    <Section title={title}>
+      <select
+        className="mb-2 w-full rounded-md border border-line bg-surface px-2 py-1.5 text-[11.5px] font-[550] text-ink"
+        value={value.fontFamily ?? ""}
+        onChange={(event) => onChange({ fontFamily: event.target.value || undefined })}
+        aria-label={`${title} font`}
+      >
+        {FONT_FAMILIES.map((f) => (
+          <option key={f.label} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+
+      <div className="mb-2 flex items-center gap-1">
+        <button
+          className={`${TOGGLE_BTN} ${value.bold ? TOGGLE_ON : TOGGLE_OFF}`}
+          aria-pressed={!!value.bold}
+          title="Bold"
+          onClick={() => onChange({ bold: !value.bold })}
+        >
+          B
+        </button>
+        <button
+          className={`${TOGGLE_BTN} ${value.italic ? TOGGLE_ON : TOGGLE_OFF} italic`}
+          aria-pressed={!!value.italic}
+          title="Italic"
+          onClick={() => onChange({ italic: !value.italic })}
+        >
+          I
+        </button>
+        <button
+          className={`${TOGGLE_BTN} ${value.underline ? TOGGLE_ON : TOGGLE_OFF} underline`}
+          aria-pressed={!!value.underline}
+          title="Underline"
+          onClick={() => onChange({ underline: !value.underline })}
+        >
+          U
+        </button>
+        <div className="mx-0.5 h-5 w-px bg-line" />
+        {(
+          [
+            { key: "left", Icon: AlignLeft },
+            { key: "center", Icon: AlignCenter },
+            { key: "right", Icon: AlignRight },
+          ] as const
+        ).map(({ key, Icon }) => (
+          <button
+            key={key}
+            className={`${TOGGLE_BTN} ${value.align === key ? TOGGLE_ON : TOGGLE_OFF}`}
+            aria-pressed={value.align === key}
+            title={`Align ${key}`}
+            onClick={() => onChange({ align: value.align === key ? undefined : key })}
+          >
+            <Icon />
+          </button>
+        ))}
+      </div>
+
+      <label className="mb-2 flex items-center gap-2 text-[11.5px] font-[550] text-slate">
+        <span className="flex-1">Size</span>
+        <input
+          type="number"
+          min={8}
+          max={48}
+          className="w-14 rounded-md border border-line bg-surface px-1.5 py-1 text-right text-[11.5px] text-ink"
+          placeholder="Auto"
+          value={value.fontSize ?? ""}
+          onChange={(event) => {
+            const n = event.target.value === "" ? undefined : Number(event.target.value);
+            onChange({ fontSize: n && n > 0 ? n : undefined });
+          }}
+        />
+        <span className="text-[9px] text-slate-soft">px</span>
+      </label>
+
+      <ColorField
+        label="Text colour"
+        value={value.color}
+        fallback="#10171a"
+        onChange={(color) => onChange({ color })}
+      />
+      <ColorField
+        label="Background"
+        value={value.background}
+        fallback="#fde68a"
+        onChange={(background) => onChange({ background })}
+      />
+      <ColorField
+        label="Border"
+        value={value.borderColor}
+        fallback="#cfd7da"
+        onChange={(borderColor) => onChange({ borderColor })}
+      />
+    </Section>
+  );
+}
+
 /** Docked right-side style panel for the current node selection — replaces
  *  the old floating pill toolbar so shape, colour, line and opacity all live
  *  in one place instead of splitting deeper options into flyouts. */
@@ -168,6 +403,8 @@ export function StylePanel({
   lineStyle,
   opacity,
   fontSize,
+  titleFormat,
+  descFormat,
   onEdit,
   onDuplicate,
   onConnect,
@@ -178,7 +415,14 @@ export function StylePanel({
   onSetLineStyle,
   onSetOpacity,
   onSetFontSize,
+  onSetTitleFormat,
+  onSetDescFormat,
 }: StylePanelProps) {
+  // A wedge/hub isn't a shape you switch between, has no dashed/dotted arc
+  // concept, and gets richer per-field text controls below instead of one
+  // flat size — so those three generic sections give way to "Title text"
+  // (both kinds) and "Description text" (wedge only, hub never shows one).
+  const isRadial = shape === "wedge" || shape === "hub";
   return (
     <aside
       className="absolute right-0 top-0 bottom-0 z-[9] flex w-[240px] flex-col overflow-y-auto border-l border-line bg-surface shadow-2 animate-[sel-pop_140ms_ease]"
@@ -225,20 +469,29 @@ export function StylePanel({
         </button>
       </div>
 
-      <Section title="Shape">
-        <div className="grid grid-cols-3 gap-1">
-          {SHAPES.map((option) => (
-            <button
-              key={option.kind}
-              className={`grid h-10 place-items-center rounded-lg border text-slate transition-[background,color,border-color] hover:bg-paper hover:text-ink [&_svg]:size-[18px] ${shape === option.kind ? "border-green-line bg-green-soft text-green-strong" : "border-transparent"}`}
-              title={option.label}
-              onClick={() => onSetShape(option.kind)}
-            >
-              <ShapeGlyph kind={option.kind} />
-            </button>
-          ))}
-        </div>
-      </Section>
+      {!isRadial && (
+        <Section title="Shape">
+          <div className="grid grid-cols-3 gap-1">
+            {SHAPES.map((option) => (
+              <button
+                key={option.kind}
+                className={`grid h-10 place-items-center rounded-lg border text-slate transition-[background,color,border-color] hover:bg-paper hover:text-ink [&_svg]:size-[18px] ${shape === option.kind ? "border-green-line bg-green-soft text-green-strong" : "border-transparent"}`}
+                title={option.label}
+                onClick={() => onSetShape(option.kind)}
+              >
+                <ShapeGlyph kind={option.kind} />
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {isRadial && (
+        <TextFormatSection title="Title text" value={titleFormat} onChange={onSetTitleFormat} />
+      )}
+      {shape === "wedge" && (
+        <TextFormatSection title="Description text" value={descFormat} onChange={onSetDescFormat} />
+      )}
 
       <Section title="Color">
         <div className="grid grid-cols-5 gap-1.5">
@@ -283,36 +536,40 @@ export function StylePanel({
         </label>
       </Section>
 
-      <Section title="Line">
-        <div className="grid grid-cols-3 gap-1">
-          {LINE_STYLES.map((option) => (
-            <button
-              key={option.key}
-              className={`rounded-md border px-1 py-[7px] text-[11px] font-[550] transition-colors ${lineStyle === option.key ? "border-green-line bg-green-soft text-green-strong" : "border-line text-slate hover:bg-paper hover:text-ink"}`}
-              onClick={() => onSetLineStyle(option.key)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </Section>
+      {shape !== "wedge" && (
+        <Section title="Line">
+          <div className="grid grid-cols-3 gap-1">
+            {LINE_STYLES.map((option) => (
+              <button
+                key={option.key}
+                className={`rounded-md border px-1 py-[7px] text-[11px] font-[550] transition-colors ${lineStyle === option.key ? "border-green-line bg-green-soft text-green-strong" : "border-line text-slate hover:bg-paper hover:text-ink"}`}
+                onClick={() => onSetLineStyle(option.key)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
 
-      <Section title="Font size">
-        <div className="grid grid-cols-3 gap-1">
-          {FONT_SIZES.map((option) => (
-            <button
-              key={option.label}
-              className={`rounded-md border px-1 py-[7px] text-[11px] font-[550] transition-colors ${fontSize === option.px ? "border-green-line bg-green-soft text-green-strong" : "border-line text-slate hover:bg-paper hover:text-ink"}`}
-              onClick={() => onSetFontSize(option.px)}
-            >
-              {option.label}
-              {option.px !== null && (
-                <span className="ml-0.5 text-[9px]">px</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </Section>
+      {!isRadial && (
+        <Section title="Font size">
+          <div className="grid grid-cols-3 gap-1">
+            {FONT_SIZES.map((option) => (
+              <button
+                key={option.label}
+                className={`rounded-md border px-1 py-[7px] text-[11px] font-[550] transition-colors ${fontSize === option.px ? "border-green-line bg-green-soft text-green-strong" : "border-line text-slate hover:bg-paper hover:text-ink"}`}
+                onClick={() => onSetFontSize(option.px)}
+              >
+                {option.label}
+                {option.px !== null && (
+                  <span className="ml-0.5 text-[9px]">px</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
 
       <Section title="Opacity">
         <div className="flex items-center gap-2.5">

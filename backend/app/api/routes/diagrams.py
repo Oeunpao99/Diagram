@@ -1,15 +1,17 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user
 from app.db.session import get_db
-from app.models import Diagram, DiagramVersion, Project, Template, User
+from app.models import Diagram, DiagramMessage, DiagramVersion, Project, Template, User
 from app.schemas.diagram import (
     DiagramCreate,
     DiagramListItem,
+    DiagramMessageCreate,
+    DiagramMessageOut,
     DiagramOut,
     DiagramUpdate,
     ProjectCreate,
@@ -251,6 +253,56 @@ async def restore_version(
     await db.commit()
     await db.refresh(diagram)
     return diagram
+
+
+# --------------------------------------------------------------------------
+# Chat messages — the Copilot thread attached to a diagram
+# --------------------------------------------------------------------------
+
+
+@router.get("/diagrams/{diagram_id}/messages", response_model=list[DiagramMessageOut])
+async def list_messages(
+    diagram_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get(db, user, diagram_id)  # 404s unless the caller owns it
+    stmt = (
+        select(DiagramMessage)
+        .where(DiagramMessage.diagram_id == diagram_id)
+        .order_by(DiagramMessage.created_at)
+    )
+    return (await db.execute(stmt)).scalars().all()
+
+
+@router.post(
+    "/diagrams/{diagram_id}/messages", response_model=DiagramMessageOut, status_code=201
+)
+async def add_message(
+    diagram_id: uuid.UUID,
+    payload: DiagramMessageCreate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get(db, user, diagram_id)
+    msg = DiagramMessage(diagram_id=diagram_id, **payload.model_dump())
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    return msg
+
+
+@router.delete("/diagrams/{diagram_id}/messages", status_code=204)
+async def clear_messages(
+    diagram_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What /new calls — clears the chat thread, leaves the diagram itself
+    untouched."""
+    await _get(db, user, diagram_id)
+    await db.execute(delete(DiagramMessage).where(DiagramMessage.diagram_id == diagram_id))
+    await db.commit()
 
 
 # --------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
+import AuthCallback from "./pages/AuthCallback";
 import DiagramsList from "./pages/DiagramsList";
 import Login from "./pages/Login";
 import ProjectDetail from "./pages/ProjectDetail";
@@ -44,6 +45,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/auth/callback/:provider" element={<AuthCallback />} />
       <Route
         path="/settings"
         element={

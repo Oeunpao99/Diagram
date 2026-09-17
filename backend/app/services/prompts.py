@@ -9,17 +9,22 @@ Return a single JSON object with this shape:
 
 {
   "title": "short human title",
-  "diagram_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map",
+  "diagram_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map | tree | radial",
   "direction": "LR | RL | TB | BT",
   "summary": "one or two sentences describing what the diagram shows",
   "lanes": [ {"id": "lane_customs", "label": "Customs", "order": 0} ],
+  "groups": [
+    {"id": "vnet", "label": "Production VNet", "parent": null},
+    {"id": "web_subnet", "label": "Web subnet", "parent": "vnet"}
+  ],
   "nodes": [
     {
       "id": "n1",
       "label": "Receive shipping documents",
-      "kind": "start | end | process | decision | document | data | database | actor | system | service | queue | cloud | note",
+      "kind": "start | end | process | decision | document | data | database | actor | system | service | queue | cloud | note | wedge | hub | circle | hexagon | octagon | triangle | pentagon | star | tag | arrow",
       "description": "optional detail shown on hover",
       "lane": "lane_customs",
+      "group": "web_subnet",
       "icon": "file-text",
       "style": {"color": "emerald"}
     }
@@ -32,12 +37,26 @@ Return a single JSON object with this shape:
 Rules:
 - Never include x/y positions or sizes. Layout is handled downstream.
 - ids are short, stable, lowercase, snake_case, and unique.
+- `kind` is a fixed list — never invent one. There is no "security", "storage",
+  "server" or "api" kind: a firewall or auth service is a "service", a bucket is
+  a "database", a VM is a "system". What the box *is* comes from its `icon`
+  (shield, lock, key, server, …), not from a new kind.
 - Every edge must point at node ids that exist in the same response.
 - Every decision node needs at least two outgoing edges, each with a label.
 - Every approval or verification step needs a rejection path.
 - The flow needs exactly one clear entry point and at least one exit.
 - Labels are verb-first and under six words where possible.
 - Only use "lanes" when the diagram type is swimlane, or when the user named actors/departments.
+- "groups" are nested boundary boxes drawn around nodes — a cloud account, a
+  VPC/VNet, a subnet, a data centre, a bounded context, a team's territory.
+  Nest them with `parent` (null = outermost) and put a node inside one with its
+  `group` field. Use them when the user describes infrastructure that lives
+  *inside* something else, which is what makes an architecture diagram readable;
+  leave "groups" empty for a plain flowchart, where a box around the steps adds
+  nothing. Never give a group x/y/width/height — like node positions, the
+  rectangle is computed downstream from whatever the group contains.
+- A group must not be its own ancestor, and a node belongs to exactly one group
+  (the innermost one) — membership in the parents is implied by nesting.
 - A node's `style.color` is optional — omit it to leave the node its default
   look. Set it either when the user explicitly asks to colour, highlight, or
   recolour something, or when the process itself has distinct categories
@@ -61,10 +80,32 @@ Valid `icon` keys:
   documents/comms: file-text, book, book-open, folder, archive, inbox, mail, send, phone-call, bell, share, link
   commerce/logistics: credit-card, shopping-cart, truck, ship, plane, package, boxes, map-pin, route, navigation, map
   status/actions: check-circle, alert-triangle, alert-circle, info, clock, timer, calendar, search, settings, wrench, hammer, refresh-cw, zap, workflow, target, trending-up, star, flag, globe, home, eye, clipboard-list, clipboard-check, image, camera
-  AWS services (use these, not the generic ones, when the user is describing AWS):
-    aws-ec2, aws-lambda, aws-ecs, aws-s3, aws-rds, aws-dynamodb, aws-elasticache,
-    aws-route53, aws-elb, aws-cloudfront, aws-api-gateway, aws-vpc, aws-iam,
-    aws-sqs, aws-sns, aws-cloudwatch
+  AWS services — the provider's own official icon for each, use these instead of
+  the generic ones when the user is describing AWS infrastructure:
+    aws-ec2, aws-lambda, aws-ecs, aws-eks, aws-s3, aws-rds, aws-dynamodb,
+    aws-elasticache, aws-route53, aws-elb, aws-cloudfront, aws-api-gateway,
+    aws-vpc, aws-iam, aws-sqs, aws-sns, aws-cloudwatch, aws-fargate,
+    aws-aurora, aws-step-functions, aws-eventbridge, aws-cloudformation,
+    aws-kms, aws-secrets-manager, aws-waf, aws-cognito, aws-redshift,
+    aws-kinesis, aws-glue, aws-sagemaker, aws-bedrock, aws-auto-scaling,
+    aws-ebs, aws-elastic-beanstalk, aws-efs, aws-direct-connect,
+    aws-transit-gateway, aws-athena, aws-msk, aws-app-runner, aws-ecr
+  Azure services — likewise the official icon for each, when the user is
+  describing Azure infrastructure:
+    az-virtual-machine, az-function-apps, az-app-services,
+    az-container-instances, az-aks, az-storage-accounts, az-sql-database,
+    az-cosmos-db, az-cache-redis, az-dns-zones, az-load-balancers,
+    az-front-door-cdn, az-api-management, az-virtual-networks,
+    az-managed-identities, az-storage-queue, az-service-bus, az-monitor,
+    az-container-registries, az-application-gateways, az-logic-apps,
+    az-event-grid-topics, az-key-vaults, az-application-insights,
+    az-firewalls, az-sql-data-warehouses, az-stream-analytics,
+    az-data-factories, az-machine-learning, az-openai, az-batch-accounts,
+    az-disks, az-app-service-plans, az-expressroute, az-traffic-manager,
+    az-data-lake-storage, az-event-hubs, az-bastions, az-automation-accounts
+  These AWS/Azure icons are the providers' real artwork — never paired with a
+  `style.color`. Setting one on a node using one of these icons is ignored by
+  the renderer for the icon itself, so leave `style.color` off those nodes.
 """
 
 QUALITY_GUIDE = """
@@ -101,6 +142,13 @@ architecture:
 - Keep one column per kind of thing — all actors together, all services
   together, all data stores together. If the user named tiers (clients, edge,
   services, data), model them as lanes; otherwise leave lanes empty.
+- Tiers and boundaries are different things. A tier is a stage the flow passes
+  through, left to right — that's a lane. A boundary is something the
+  infrastructure sits *inside*: a subscription, a VPC or VNet, a subnet, a
+  region, an on-prem data centre, a trust boundary. Those are "groups", and
+  they nest. Whenever the user describes cloud infrastructure, reach for groups
+  — an architecture diagram without its boundaries drawn is the single thing
+  that most makes one look unfinished.
 - An audit, event, or background write is a dashed edge.
 
 data_flow:
@@ -108,6 +156,25 @@ data_flow:
   and tables/stores are kind "data". A validation gate is a decision: its
   "Yes" flows on, its "No" drops into a quarantine store, and a re-run loops
   back as a dashed edge labelled with what comes back (e.g. "corrected records").
+
+radial:
+- Use this — not process_flow or mind_map — when the request is to show equal
+  parts of one whole with no order or flow between them: components of a
+  system, pillars of a strategy, categories, a set of skills, the slices of
+  "components of X" or "the N parts of Y". If the parts happen in sequence or
+  one causes the next, that's process_flow instead.
+- Every part is kind "wedge": short label (2-4 words), a one-sentence
+  `description` (shown next to the wedge — this carries real content, don't
+  leave it empty), and always an `icon` from the list below — a wedge with no
+  icon is the one thing that makes this diagram type look unfinished. 5-8
+  wedges is the sweet spot; below 4 there's no ring to speak of, above 10 the
+  labels start crowding each other.
+- Add exactly one kind "hub" node for the centre of the wheel, `label` the
+  diagram's subject (e.g. "Components of ICT") and `description` a one-line
+  definition, only when the subject itself is worth naming in the middle —
+  skip it if the wedges already speak for themselves.
+- No edges, no lanes, no groups — a wedge's position comes entirely from its
+  order in the `nodes` array, evenly divided around the circle.
 
 For every type:
 - Match the node count to what the user actually described — don't compress
@@ -142,7 +209,7 @@ Return a single JSON object:
 {
   "improved": "the rewritten request, 1-3 sentences, concrete and specific",
   "missing_information": ["question the user should answer", "..."],
-  "recommended_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map",
+  "recommended_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map | tree | radial",
   "recommended_template_slug": "slug from the provided list, or null",
   "reasoning": "one sentence on why that type fits"
 }
@@ -225,7 +292,7 @@ Return a single JSON object:
 {
   "improved": "a precise, 2-5 sentence description of the diagram — the trigger, the main steps in order, the decision points, and how it ends",
   "missing_information": ["something in the sketch that's ambiguous or hard to make out", "..."],
-  "recommended_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map",
+  "recommended_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map | tree | radial",
   "recommended_template_slug": "slug from the provided list, or null",
   "reasoning": "one sentence on why that type fits"
 }
@@ -282,6 +349,62 @@ user placed by hand.
 The diagram inside "doc" follows this schema:
 {SCHEMA_BLOCK}"""
 
+RESTYLE_TEMPLATE_SYSTEM = f"""You reorganize an existing diagram to follow the
+structural pattern of a reference template — its lane/stage structure, the
+kind of categories it groups steps into, its overall shape — while keeping
+the user's own real content. This is not "replace with the template's
+example" — it's "restructure what the user actually has to fit that same
+pattern."
+
+- Keep every step's real meaning, and its label wherever it still fits.
+  Only add, remove, split, or merge steps when the template's pattern
+  genuinely implies a different granularity than the current diagram has —
+  e.g. the template always separates review from approval as two steps, and
+  the current diagram has them merged into one.
+- Reassign nodes to lanes matching the template's own lane structure when
+  the template uses lanes (rename/reorder lanes to match it too). Drop
+  lanes the current diagram has that the template's pattern doesn't use.
+- Same for "groups": if the template nests its nodes in boundary containers
+  (a subscription/VNet/subnet, an account, a trust boundary), reassign the
+  current diagram's nodes into that same nesting, renamed to fit the user's
+  content, and drop groups the current diagram has that don't match the
+  template's pattern.
+- Never invent content by copying the template's own example steps in place
+  of the user's real ones — the template is a structural reference, not a
+  script. If the current diagram is missing something the pattern expects
+  (e.g. no rejection path, and the template always has one), you may add a
+  generically-labelled step for it, but say so plainly in "changes" rather
+  than presenting it as something the user already had.
+- You never place anything — a full relayout always runs after this, since
+  reorganizing lanes/stages makes the old positions meaningless anyway.
+
+Return a single JSON object:
+
+{{
+  "doc": {{ ...the complete restructured diagram, same schema as below... }},
+  "changes": ["Reorganized into the template's three lanes", "Split 'Review and approve' into two steps to match the template's pattern", "..."]
+}}
+
+The diagram inside "doc" follows this schema:
+{SCHEMA_BLOCK}
+
+{QUALITY_GUIDE}"""
+
+REWRITE_PLAN_SYSTEM = """A user asked for a structural change to their diagram
+that's broad enough to need a full rewrite rather than a precise tool list.
+Before that rewrite runs, produce a short, honest plan of what it's about to
+do — this is shown to the user as a todo list while they wait, so ground it
+in the actual instruction and diagram below, not generic phases like
+"Planning" or "Processing the request".
+
+Return a single JSON object:
+
+{"steps": ["Add a rejection path to every approval step", "..."]}
+
+2 to 6 steps, each a concrete action, verb-first, under eight words, in the
+order they'll actually happen. One step is fine for a narrow request; don't
+pad it to look thorough. Output JSON only."""
+
 DOCUMENTATION_SYSTEM = """You write process documentation from a diagram.
 
 Given the diagram JSON, produce clean Markdown with these sections, skipping any
@@ -331,10 +454,14 @@ diagram when they only asked a question costs them trust.
 For "ask", write `answer` directly to the user, in a few sentences — grounded
 in the actual nodes, edges, and labels below, not a generic description of
 what a diagram like this usually looks like. Reference real labels from the
-diagram. If they asked for ideas or feedback, give 2-4 concrete, specific
-suggestions rather than a general checklist, and make clear you're suggesting,
-not doing — if they want a suggestion made real, they'll ask next. Never
-describe JSON, node ids, or anything about how the diagram is stored.
+diagram, in **bold**. If they asked for ideas or feedback, give 2-4 concrete,
+specific suggestions rather than a general checklist, and make clear you're
+suggesting, not doing — if they want a suggestion made real, they'll ask next.
+Format `answer` as Markdown that reads well in a chat bubble: a short lead-in
+line first, then any enumeration — options, steps, suggestions — as a proper
+numbered or bulleted list with one entry per item, never "1) 2) 3)" run
+together inside a paragraph. No headings, no code blocks, no long paragraphs.
+Never describe JSON, node ids, or anything about how the diagram is stored.
 
 Output JSON only."""
 
@@ -346,6 +473,14 @@ def agent_system(tool_catalogue: str) -> str:
     return f"""A user has a diagram open and just sent one chat message about it.
 Decide what they want, then either answer them or act.
 
+A short message below the diagram — "all", "yes", "the second one", "both",
+a bare colour name — is very often a direct reply to a question *you*
+yourself asked in the immediately preceding turn (shown in "Recent
+conversation" below, when there is one). Read it that way first: resolve it
+against your own last question and act or answer accordingly, rather than
+asking the same question again. Re-ask only when the reply genuinely doesn't
+resolve anything you asked — not just because it's short.
+
 Return a single JSON object, one of three shapes:
 
 {{"intent": "ask", "answer": "your reply to the user"}}
@@ -356,6 +491,13 @@ Return a single JSON object, one of three shapes:
   what a diagram like this usually looks like. For ideas or feedback, give 2-4
   concrete suggestions and make clear you're suggesting, not doing. Never
   mention JSON, node ids, or anything about how the diagram is stored.
+
+  Format `answer` as Markdown that reads well in a chat bubble: a short
+  lead-in line, node and edge labels in **bold**, and any enumeration —
+  options, steps, suggestions — as a proper numbered or bulleted list with one
+  entry per item, never "1) 2) 3)" run together inside a paragraph. No
+  headings, no code blocks, no long paragraphs; a few tight lines beat a wall
+  of text.
 
 {{"intent": "act", "actions": [{{"tool": "...", "args": {{...}}}}], "answer": "one short sentence on what you did"}}
 
@@ -401,8 +543,16 @@ def agent_user_prompt(
     message: str,
     selection: list[str],
     edge_selection: list[str],
+    history: list[tuple[str, str]] | None = None,
 ) -> str:
-    parts = [f"User message:\n{message}"]
+    parts: list[str] = []
+    if history:
+        # Oldest first, capped per line so one long earlier answer can't
+        # crowd out the diagram itself — this is context for resolving a
+        # short reply, not a transcript the model needs verbatim.
+        lines = "\n".join(f"{role}: {text[:400]}" for role, text in history)
+        parts.append(f"Recent conversation (oldest first):\n{lines}")
+    parts.append(f"User message:\n{message}")
     if selection:
         parts.append(
             "Nodes the user currently has selected (this is what \"these\"/\"this\" "
@@ -428,8 +578,12 @@ def generate_user_prompt(
     parts.append(f"Preferred flow direction: {direction}")
     if template_hint:
         parts.append(
-            "Start from this template structure and adapt it to the request. "
-            "Keep its lane names if they fit:\n" + template_hint
+            "Start from this template's structure and adapt it to the request — its "
+            "node/edge shape, and its lanes or groups if the request has the same kind "
+            "of structure. But the template is a starting point, not a ceiling: if the "
+            "request describes boundaries the template doesn't have (or doesn't need "
+            "ones the template does), add or drop groups/lanes to match what was asked "
+            "for rather than copying the template's structure as-is:\n" + template_hint
         )
     return "\n\n".join(parts)
 
@@ -441,3 +595,14 @@ def edit_user_prompt(doc_json: str, instruction: str, selection: list[str]) -> s
             "The user has these nodes selected — scope the change to them: " + ", ".join(selection)
         )
     return "\n\n".join(parts)
+
+
+def rewrite_plan_user_prompt(doc_json: str, instruction: str) -> str:
+    return f"Instruction:\n{instruction}\n\nCurrent diagram:\n{doc_json}"
+
+
+def restyle_template_user_prompt(doc_json: str, template_name: str, template_json: str) -> str:
+    return (
+        f'Reference template — "{template_name}":\n{template_json}\n\n'
+        f"Current diagram to restructure:\n{doc_json}"
+    )

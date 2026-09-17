@@ -1,6 +1,9 @@
+import asyncio
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +27,7 @@ from app.schemas.diagram import (
     ImprovePromptRequest,
     ImprovePromptResponse,
     LayoutRequest,
+    RestyleTemplateRequest,
     RouteMessageRequest,
     RouteMessageResponse,
     ValidationReport,
@@ -170,6 +174,72 @@ async def _assert_owns(db: AsyncSession, user: User, diagram_id: uuid.UUID | Non
         raise HTTPException(404, "Diagram not found.")
 
 
+@router.post("/agent/stream", response_class=StreamingResponse)
+async def agent_stream(
+    payload: AgentRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The streaming form of /ai/agent: same decision pipeline, but progress
+    is pushed to the client as Server-Sent Events at each real step so the
+    chat can show what's happening as it happens.
+
+    Events (one JSON object per `data:` line):
+      {"type": "plan",   "steps": [{"id", "label"}, ...]}  one or more steps
+                                                            now known — a run
+                                                            can emit this more
+                                                            than once (e.g. a
+                                                            layout step only
+                                                            becomes knowable
+                                                            after earlier
+                                                            steps have run)
+      {"type": "step",   "id", "label"}   that step id is done, real text
+      {"type": "result", "result": AgentResponse}
+      {"type": "error",  "message"}
+    """
+    if not payload.message.strip():
+        raise HTTPException(400, "Say what you'd like to know or change.")
+    await _assert_owns(db, user, payload.diagram_id)
+
+    queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+
+    async def worker() -> None:
+        try:
+            body = await ai.run_agent(
+                db,
+                payload.doc,
+                payload.message,
+                payload.selection,
+                payload.edge_selection,
+                diagram_id=payload.diagram_id,
+                history=payload.history,
+                on_progress=lambda event: queue.put_nowait(event),
+            )
+            queue.put_nowait({"type": "result", "result": body.model_dump(mode="json")})
+        except Exception as exc:
+            queue.put_nowait({"type": "error", "message": f"Agent failed: {exc}"})
+        finally:
+            queue.put_nowait(None)
+
+    task = asyncio.create_task(worker())
+
+    async def stream() -> object:
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            task.cancel()
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/agent", response_model=AgentResponse)
 async def agent(
     payload: AgentRequest,
@@ -194,6 +264,7 @@ async def agent(
             payload.selection,
             payload.edge_selection,
             diagram_id=payload.diagram_id,
+            history=payload.history,
         )
     except Exception as exc:
         raise HTTPException(502, f"Agent failed: {exc}") from exc
@@ -224,6 +295,27 @@ async def edit(
         )
     except Exception as exc:
         raise HTTPException(502, f"Edit agent failed: {exc}") from exc
+
+
+@router.post("/restyle-template", response_model=EditResponse)
+async def restyle_template(
+    payload: RestyleTemplateRequest,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reorganize the open diagram to follow a template's structure, keeping
+    the user's own content — what the toolbar's Template menu calls once a
+    diagram already has content (as opposed to loading a template's static
+    example onto a blank canvas, which is a plain client-side swap)."""
+    await _assert_owns(db, user, payload.diagram_id)
+    try:
+        return await ai.restyle_to_template(
+            db, payload.doc, payload.template_slug, diagram_id=payload.diagram_id
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(502, f"Restyle failed: {exc}") from exc
 
 
 @router.post("/validate", response_model=ValidationReport)

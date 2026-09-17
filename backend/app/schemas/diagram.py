@@ -29,6 +29,16 @@ class NodeKind(str, Enum):
     queue = "queue"
     cloud = "cloud"
     note = "note"
+    wedge = "wedge"
+    hub = "hub"
+    circle = "circle"
+    hexagon = "hexagon"
+    octagon = "octagon"
+    triangle = "triangle"
+    pentagon = "pentagon"
+    star = "star"
+    tag = "tag"
+    arrow = "arrow"
 
 
 class EdgeStyle(str, Enum):
@@ -65,6 +75,8 @@ class DiagramType(str, Enum):
     data_flow = "data_flow"
     org_chart = "org_chart"
     mind_map = "mind_map"
+    tree = "tree"
+    radial = "radial"
 
 
 class Position(BaseModel):
@@ -77,6 +89,13 @@ class Size(BaseModel):
     height: float = 64
 
 
+class Rect(BaseModel):
+    x: float = 0
+    y: float = 0
+    width: float = 0
+    height: float = 0
+
+
 class Node(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -85,6 +104,7 @@ class Node(BaseModel):
     kind: NodeKind = NodeKind.process
     description: str | None = None
     lane: str | None = Field(default=None, description="Swimlane / group id this node belongs to")
+    group: str | None = Field(default=None, description="Nested container id this node sits in")
     position: Position = Field(default_factory=Position)
     size: Size = Field(default_factory=Size)
     style: dict[str, Any] = Field(default_factory=dict)
@@ -140,6 +160,23 @@ class Lane(BaseModel):
     color: str | None = None
 
 
+class Group(BaseModel):
+    """A nested container — an architecture boundary (a subscription, a VNet, a
+    subnet) that encloses nodes and other groups.
+
+    Unlike a Lane, which is a flat band perpendicular to the flow, a group nests
+    to arbitrary depth via `parent` and takes its shape from whatever it holds.
+    `rect` is derived by the layout engine from the members' bounds; authoring
+    one by hand is pointless because the next layout pass overwrites it.
+    """
+
+    id: str
+    label: str
+    parent: str | None = Field(default=None, description="Enclosing group id; None = top level")
+    collapsed: bool = False
+    rect: Rect | None = None
+
+
 class DiagramDoc(BaseModel):
     """The whole document."""
 
@@ -150,6 +187,7 @@ class DiagramDoc(BaseModel):
     nodes: list[Node] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
     lanes: list[Lane] = Field(default_factory=list)
+    groups: list[Group] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -225,6 +263,17 @@ class EditResponse(BaseModel):
     validation: ValidationReport
 
 
+class RestyleTemplateRequest(BaseModel):
+    """Reorganize an existing diagram to follow a template's structure,
+    keeping the user's own content — see ai.restyle_to_template. Distinct
+    from GenerateRequest's `template_slug`, which only ever seeds a brand
+    new diagram."""
+
+    doc: DiagramDoc
+    template_slug: str
+    diagram_id: uuid.UUID | None = None
+
+
 class RouteMessageRequest(BaseModel):
     """What the copilot chat sends before deciding whether a message is an
     edit instruction or a question — same input either way, one classifier
@@ -249,16 +298,27 @@ class AgentAction(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChatTurn(BaseModel):
+    """One earlier line of the conversation, trimmed to what the agent needs
+    to resolve a short follow-up ("all", "yes", "the second one") against
+    its own last question — not a transcript, just enough context."""
+
+    role: Literal["user", "ai"]
+    text: str
+
+
 class AgentRequest(BaseModel):
     """The copilot chat's single front door. Everything the agent needs to
     resolve "these", "it", and "that step" is in here — the doc, the message,
-    and whatever the user currently has picked on the canvas."""
+    whatever the user currently has picked on the canvas, and a little of
+    what was said just before this message."""
 
     doc: DiagramDoc
     message: str
     selection: list[str] = Field(default_factory=list)
     edge_selection: list[str] = Field(default_factory=list)
     diagram_id: uuid.UUID | None = None
+    history: list[ChatTurn] = Field(default_factory=list)
 
 
 class AgentResponse(BaseModel):
@@ -292,13 +352,14 @@ class ValidationReport(BaseModel):
     node_count: int = 0
     edge_count: int = 0
     lane_count: int = 0
+    group_count: int = 0
     issues: list[Issue] = Field(default_factory=list)
 
 
 class LayoutRequest(BaseModel):
     doc: DiagramDoc
     direction: Direction | None = None
-    algorithm: Literal["layered", "tree", "grid", "swimlane"] = "layered"
+    algorithm: Literal["layered", "tree", "grid", "swimlane", "radial"] = "layered"
     width: float | None = Field(
         default=None,
         description="Target page width in flow px. When set (with height) the layout reshapes itself to fit inside this box — e.g. a 16:9 slide or an A4 page.",
@@ -397,6 +458,28 @@ class VersionOut(BaseModel):
     version: int
     label: str | None
     origin: str
+    created_at: datetime
+
+
+class DiagramMessageCreate(BaseModel):
+    """One line of the Copilot chat, as the frontend already has it the
+    moment it's shown — `changes`/`warnings` mirror the finished-edit
+    checklist card so a restored message renders the same way live."""
+
+    role: Literal["user", "ai"]
+    text: str
+    changes: list[str] | None = None
+    warnings: list[str] | None = None
+
+
+class DiagramMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    role: Literal["user", "ai"]
+    text: str
+    changes: list[str] | None
+    warnings: list[str] | None
     created_at: datetime
 
 

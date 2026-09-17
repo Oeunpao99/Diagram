@@ -74,6 +74,61 @@ class TestLayout:
         assert by_id["4"].source_handle == "b"
         assert by_id["4"].target_handle == "t"
 
+    def test_layer_skipping_edge_is_routed_off_the_forward_corridor(self):
+        """A forward edge that jumps past a layer — a fast path, a cancel, an
+        escalation — used to keep the default right->left ports, which draws
+        it straight across every layer in between and so directly over the
+        nodes sitting there. It wants its own top/bottom lane, same as a back
+        edge; only the edge to the *adjacent* layer belongs in the corridor."""
+        doc = doc_from(
+            nodes=[{"id": f"n{i}", "label": f"Step {i}", "kind": "process"} for i in range(4)],
+            edges=[{"id": f"e{i}", "source": f"n{i}", "target": f"n{i + 1}"} for i in range(3)]
+            + [{"id": "skip", "source": "n0", "target": "n3", "label": "fast path"}],
+        )
+        by_id = {e.id: e for e in apply_layout(doc, Direction.LR).edges}
+
+        # Step-to-next-step stays on the main corridor.
+        for i in range(3):
+            assert by_id[f"e{i}"].source_handle is None
+            assert by_id[f"e{i}"].target_handle is None
+        # The one that vaults over n1/n2 does not.
+        assert by_id["skip"].source_handle == "b"
+        assert by_id["skip"].target_handle == "t"
+
+    def test_edge_over_a_same_lane_neighbour_is_rerouted(self):
+        """Two nodes sharing a layer *and* a lane are placed side by side
+        along the flow axis at the same height, so an edge to the further
+        one is drawn straight through the nearer one. Layer distance can't
+        see this (both targets are one layer on) — only final coordinates
+        can, which is why the check runs after placement."""
+        doc = doc_from(
+            nodes=[
+                {"id": "a", "label": "Kickoff", "kind": "process", "lane": "l1"},
+                {"id": "b", "label": "Branch one", "kind": "process", "lane": "l1"},
+                {"id": "c", "label": "Branch two", "kind": "process", "lane": "l1"},
+            ],
+            edges=[
+                {"id": "e1", "source": "a", "target": "b"},
+                {"id": "e2", "source": "a", "target": "c"},
+            ],
+            lanes=[{"id": "l1", "label": "Team", "order": 0}],
+            diagram_type="swimlane",
+        )
+        result = apply_layout(doc, Direction.LR, "swimlane")
+        by_id = {e.id: e for e in result.edges}
+        placed = {n.id: n for n in result.nodes}
+
+        # The premise: b and c really are stacked in the same lane row.
+        assert placed["b"].position.y == placed["c"].position.y
+        assert placed["a"].position.x < placed["b"].position.x < placed["c"].position.x
+
+        # Nothing sits between a and b, so that one keeps the tidy default.
+        assert by_id["e1"].source_handle is None
+        assert by_id["e1"].target_handle is None
+        # b sits squarely between a and c — that one gets its own lane.
+        assert by_id["e2"].source_handle == "b"
+        assert by_id["e2"].target_handle == "t"
+
     def test_edge_routing_never_overrides_a_chosen_handle(self):
         """A handle the user (or a previous relayout) already set is never
         silently reverted, even if it now looks like a forward edge."""
@@ -99,6 +154,31 @@ class TestLayout:
         assert x["a"] < x["b"] < x["c"]
         # d and e are siblings in the same layer — they share x and differ on y.
         assert x["d"] == x["e"]
+
+    def test_fit_to_box_never_overlaps_even_under_heavy_shrink(self):
+        """Scaling position without scaling the node box is mathematically
+        guaranteed to overlap once the required scale drops below roughly
+        size/(size+gap) — a bushy diagram fit to a small page hits that
+        routinely. Both must shrink together."""
+        wide = doc_from(
+            nodes=[{"id": "root", "label": "Root"}]
+            + [{"id": f"leaf{i}", "label": f"Leaf {i}"} for i in range(10)],
+            edges=[
+                {"id": str(i), "source": "root", "target": f"leaf{i}"} for i in range(10)
+            ],
+        )
+        doc = apply_layout(wide, Direction.LR, "layered", 400, 300)
+        assert doc.meta["fit_scale"] < 0.56  # the exact threshold that used to break it
+        overlaps = [
+            (a.id, b.id)
+            for i, a in enumerate(doc.nodes)
+            for b in doc.nodes[i + 1 :]
+            if a.position.x < b.position.x + b.size.width
+            and a.position.x + a.size.width > b.position.x
+            and a.position.y < b.position.y + b.size.height
+            and a.position.y + a.size.height > b.position.y
+        ]
+        assert not overlaps
 
     def test_fit_to_box_contains_every_node(self):
         doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 640, 480)
@@ -213,6 +293,58 @@ class TestLayout:
         y = {n.id: n.position.y for n in doc.nodes}
         assert y["a"] != y["b"]
         assert doc.meta["lane_thickness"] > 0
+
+
+class TestRadialLayout:
+    def test_wedges_split_the_circle_without_angular_overlap(self):
+        doc = doc_from(
+            nodes=[
+                {"id": "hub", "label": "Hub", "kind": "hub"},
+                *(
+                    {"id": f"w{i}", "label": f"Theme {i}", "kind": "wedge"}
+                    for i in range(6)
+                ),
+            ],
+            edges=[],
+            diagram_type="radial",
+        )
+        result = apply_layout(doc, Direction.LR, "radial")
+
+        wedges = [n for n in result.nodes if n.kind == "wedge"]
+        assert len(wedges) == 6
+        slices = sorted((n.style["startAngle"], n.style["endAngle"]) for n in wedges)
+        for (_, end), (start, _) in zip(slices, slices[1:]):
+            assert end <= start + 1e-6  # neighbouring slices never overlap
+
+        # Every wedge gets a real, distinct bounding box, not a shared one.
+        boxes = [(n.position.x, n.position.y, n.size.width, n.size.height) for n in wedges]
+        assert len(set(boxes)) == len(boxes)
+        assert all(w > 0 and h > 0 for *_, w, h in boxes)
+
+        hub = next(n for n in result.nodes if n.kind == "hub")
+        assert hub.size.width > 0 and hub.size.height > 0
+        # The hub sits centred in the ring's hole.
+        hub_cx = hub.position.x + hub.size.width / 2
+        hub_cy = hub.position.y + hub.size.height / 2
+        w0 = wedges[0]
+        assert abs(hub_cx - (w0.position.x + w0.style["centerX"])) < 1.0
+        assert abs(hub_cy - (w0.position.y + w0.style["centerY"])) < 1.0
+
+    def test_radial_diagram_has_no_orphan_or_overlap_warnings(self):
+        doc = doc_from(
+            nodes=[
+                {"id": "hub", "label": "Hub", "kind": "hub"},
+                *(
+                    {"id": f"w{i}", "label": f"Theme {i}", "kind": "wedge"}
+                    for i in range(7)
+                ),
+            ],
+            edges=[],
+            diagram_type="radial",
+        )
+        result = apply_layout(doc, Direction.LR, "radial")
+        report = validate(result)
+        assert not report.issues, [i.message for i in report.issues]
 
 
 class TestValidator:

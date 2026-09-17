@@ -9,14 +9,22 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type { FlowNode } from "../api/adapter";
 import type { NodeKind } from "../api/types";
 import { queueSkipNextDocFit } from "../lib/docFit";
+import { NODE_COLORS, resolveNodeColor } from "../lib/nodeColor";
+import { textFormatStyle, type TextFormat } from "../lib/textFormat";
 import { useDiagram } from "../store/useDiagram";
+import { wedgeIconAnchor, wedgeLeader, wedgePathD, type WedgeGeometry } from "../lib/wedgePath";
 import { ICON_CATALOG } from "./iconCatalog";
+
+// Re-exported for EdgeToolbar.tsx / StylePanel.tsx, which already import the
+// palette from here rather than the shared lib directly.
+export { NODE_COLORS };
 
 /** Key -> icon component, so a node's `icon` string resolves in one lookup
  *  instead of scanning the whole catalogue on every render. */
@@ -32,110 +40,26 @@ const SHAPE: Record<NodeKind, string> = {
   data: "para",
   database: "cylinder",
   actor: "actor",
-  system: "box",
-  service: "box",
-  queue: "para",
+  system: "component",
+  service: "component",
+  queue: "queue",
   cloud: "cloud",
   note: "note",
+  wedge: "wedge",
+  hub: "hub",
+  circle: "circle",
+  hexagon: "hexagon",
+  octagon: "octagon",
+  triangle: "triangle",
+  pentagon: "pentagon",
+  star: "star",
+  tag: "tag",
+  arrow: "arrow",
 };
-
-/** Per-node colour palette. Picked in the selection toolbar and stored in
- *  `node.style.color`; undefined keeps the default theme look. A raw `#hex`
- *  is also accepted for arbitrary custom colours.
- *
- *  Full-strength fill, not a pastel tint — `bg` is the saturated colour
- *  itself (what used to live in `line`), `line` is a darker shade of that
- *  same hue for the border, and `ink` is white so it reads against the
- *  now-solid background, the same treatment the start/end pills already use. */
-export const NODE_COLORS: Record<
-  string,
-  { bg: string; line: string; ink: string }
-> = {
-  teal: { bg: "#0d9488", line: "#0b423d", ink: "#ffffff" },
-  emerald: { bg: "#0d9f6e", line: "#0a4a36", ink: "#ffffff" },
-  blue: { bg: "#2563eb", line: "#173b78", ink: "#ffffff" },
-  indigo: { bg: "#4f46e5", line: "#2a2268", ink: "#ffffff" },
-  violet: { bg: "#6d5ae0", line: "#33246b", ink: "#ffffff" },
-  fuchsia: { bg: "#c026d3", line: "#73177e", ink: "#ffffff" },
-  rose: { bg: "#c4372f", line: "#6b140f", ink: "#ffffff" },
-  orange: { bg: "#ea7a10", line: "#6b3006", ink: "#ffffff" },
-  amber: { bg: "#b06f0e", line: "#5a3a06", ink: "#ffffff" },
-  slate: { bg: "#5b6b7b", line: "#1e293b", ink: "#ffffff" },
-};
-
-function hexRgb(hex: string): [number, number, number] | null {
-  let h = hex.replace("#", "");
-  if (h.length === 3)
-    h = h
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
-  const n = parseInt(h, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function mixToward(
-  rgb: [number, number, number],
-  target: number,
-  amount: number,
-): string {
-  const mixed = rgb.map((ch) => Math.round(ch + (target - ch) * amount));
-  const [r, g, b] = mixed;
-  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
-}
-
-/** Each diagram family gets its own laid-back accent palette, so a process
- *  flow, an org chart and a network read as different "worlds" at a glance
- *  even before you look at the shapes. Only applies when the user hasn't
- *  pinned an explicit colour on the node. */
-const TYPE_DEFAULT: Record<string, { bg: string; line: string; ink: string }> =
-  {
-    process_flow: { bg: "#f2effc", line: "#7a6be0", ink: "#2c2360" },
-    swimlane: { bg: "#eef3fc", line: "#4f7fce", ink: "#22406f" },
-    architecture: { bg: "#eef1f6", line: "#4f637c", ink: "#1f2c3d" },
-    network: { bg: "#e6f3f4", line: "#2b8a94", ink: "#145760" },
-    sequence: { bg: "#f8f0de", line: "#b0781f", ink: "#5c3f0c" },
-    er: { bg: "#fae9f1", line: "#b84b78", ink: "#5c213e" },
-    data_flow: { bg: "#e2f4ec", line: "#1d9a6c", ink: "#10503a" },
-    org_chart: { bg: "#faece3", line: "#c1763a", ink: "#5c2e0e" },
-    mind_map: { bg: "#fae8e6", line: "#c6574f", ink: "#5c201b" },
-  };
-
-/** Kinds that adopt the family accent — the "meat" boxes. The rest stay
- *  semantic: start/end pills, the amber decision, green data/DB, actors and
- *  dashed notes. */
-const TINTED_KINDS: ReadonlySet<NodeKind> = new Set([
-  "process",
-  "system",
-  "service",
-  "cloud",
-  "document",
-  "queue",
-]);
 
 function nodeColor(data: FlowNode["data"], diagramType?: string) {
-  const key = typeof data.style?.color === "string" ? data.style.color : null;
-  if (key && key in NODE_COLORS) return NODE_COLORS[key];
-  if (key?.startsWith("#")) {
-    const rgb = hexRgb(key);
-    if (rgb) {
-      // Full-strength, same as the named swatches: the picked colour is the
-      // fill itself, not lightened into a tint. Luma is read off that same
-      // fill (not some other mix of it), so the dark/light ink split it
-      // drives actually matches what's behind the text.
-      const luma = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
-      return {
-        bg: key,
-        line: mixToward(rgb, 0, 0.35),
-        ink: luma > 150 ? "#1e293b" : "#ffffff",
-      };
-    }
-  }
-  if (diagramType && !data.imageUrl && TINTED_KINDS.has(data.kind)) {
-    return TYPE_DEFAULT[diagramType];
-  }
-  return undefined;
+  const color = typeof data.style?.color === "string" ? data.style.color : null;
+  return resolveNodeColor(data.kind, color, !!data.imageUrl, diagramType);
 }
 
 type ResizeCorner = "tl" | "tr" | "bl" | "br";
@@ -195,6 +119,22 @@ function commitLabel(id: string, label: string) {
   );
 }
 
+/** Same, for `description` — unlike the label, an empty value is a legitimate
+ *  "clear it" rather than a "still loading" sentinel, so blank is allowed. */
+function commitDescription(id: string, description: string) {
+  const trimmed = description.trim();
+  const current = useDiagram.getState().doc;
+  useDiagram.getState().setDoc(
+    {
+      ...current,
+      nodes: current.nodes.map((n) =>
+        n.id === id ? { ...n, description: trimmed || null } : n,
+      ),
+    },
+    { silent: true },
+  );
+}
+
 export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   const shape = SHAPE[data.kind] ?? "box";
   const diagramType = useDiagram((s) => s.doc.diagram_type);
@@ -203,6 +143,13 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(data.label);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Wedge-only: its description renders as real on-canvas text (every other
+  // kind only ever shows it as a hover tooltip), so it's the one place a
+  // description needs its own independent edit target, separate from the
+  // label above it.
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descDraft, setDescDraft] = useState(data.description ?? "");
+  const descRef = useRef<HTMLTextAreaElement>(null);
   const { setNodes } = useReactFlow<FlowNode>();
   // Hooks only run during render — grabbed here, then read via
   // store.getState() from inside the pointermove closure below, which fires
@@ -319,9 +266,21 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
     }
   }, [editing, data.label]);
 
+  useEffect(() => {
+    if (editingDesc) {
+      setDescDraft(data.description ?? "");
+      requestAnimationFrame(() => descRef.current?.select());
+    }
+  }, [editingDesc, data.description]);
+
   const finishEditing = (commit: boolean) => {
     if (commit) commitLabel(id, draft);
     setEditing(false);
+  };
+
+  const finishEditingDesc = (commit: boolean) => {
+    if (commit) commitDescription(id, descDraft);
+    setEditingDesc(false);
   };
 
   const borderStyle = data.style?.borderStyle;
@@ -329,14 +288,168 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   const fontSize = data.style?.fontSize;
   const NodeIcon = typeof data.icon === "string" ? ICON_BY_KEY.get(data.icon) : undefined;
   // Only when the user actually picked a colour (not a diagram-type default
-  // tint) — see awsIcons.tsx: this is what tells a branded AWS badge icon to
-  // drop its fixed category colour and follow the node's instead, the same
-  // way every plain icon already does via `currentColor`.
+  // tint) — every plain (lucide-react) icon in the catalog follows the node
+  // via `currentColor`. The AWS/Azure official service icons (awsServiceIcons
+  // / azureServiceIcons) don't take a `color` prop at all and silently ignore
+  // this — their artwork is fixed by the providers' icon usage terms, which
+  // is also why this app never offers to recolour them.
   const iconAccent = typeof data.style?.color === "string" ? color?.ink : undefined;
 
+  if (shape === "wedge") {
+    const s = data.style ?? {};
+    const geo: WedgeGeometry | null =
+      typeof s.startAngle === "number" && typeof s.endAngle === "number"
+        ? {
+            centerX: Number(s.centerX ?? 0),
+            centerY: Number(s.centerY ?? 0),
+            startAngle: Number(s.startAngle),
+            endAngle: Number(s.endAngle),
+            innerRadius: Number(s.innerRadius ?? 0),
+            outerRadius: Number(s.outerRadius ?? 0),
+            labelRadius: Number(s.labelRadius ?? 0),
+            labelSide: s.labelSide === "left" ? "left" : "right",
+          }
+        : null;
+    // Layout hasn't computed this wedge's angle/radius yet (the instant
+    // after a template lands, before autoLayout resolves) — nothing sane to
+    // draw, so render nothing rather than a stray full-size box.
+    if (!geo) return null;
+
+    const badgeRadius = 18;
+    const fill = color?.bg ?? "#94a3b8";
+    const stroke = color?.line ?? "#475569";
+    const iconAnchor = wedgeIconAnchor(geo);
+    const { from: leaderFrom, to: leaderTo } = wedgeLeader(geo);
+    const onRight = geo.labelSide === "right";
+    const labelStyle = {
+      top: leaderTo.y,
+      ...(onRight ? { left: leaderTo.x } : { right: data.width - leaderTo.x }),
+    };
+    const titleFormat = data.style?.titleFormat as TextFormat | undefined;
+    const descFormat = data.style?.descFormat as TextFormat | undefined;
+    const titleFormatStyle = textFormatStyle(titleFormat);
+    const descFormatStyle = textFormatStyle(descFormat);
+
+    // Capture, not bubble — see the comment on the default branch's own
+    // handler below for why locked nodes need this. Handlers live on the
+    // specific leaf elements (arc, title, description) rather than one
+    // shared wrapper handler, so double-clicking the description edits
+    // *that* — not the label — even though both sit inside the same
+    // positioned label box.
+    const editLabelOnDoubleClick = (event: ReactMouseEvent) => {
+      event.stopPropagation();
+      setEditing(true);
+    };
+    const editDescOnDoubleClick = (event: ReactMouseEvent) => {
+      event.stopPropagation();
+      setEditingDesc(true);
+    };
+
+    return (
+      <div
+        className={`node node--wedge ${selected ? "is-selected" : ""} ${data.justAdded ? "node--just-added" : ""}`}
+        style={{ width: data.width, height: data.height }}
+        title={data.description ?? undefined}
+      >
+        <svg className="node__wedge-svg" onDoubleClickCapture={editLabelOnDoubleClick}>
+          <path d={wedgePathD(geo)} fill={fill} stroke={stroke} strokeWidth={1.5} />
+          <line
+            x1={leaderFrom.x}
+            y1={leaderFrom.y}
+            x2={leaderTo.x}
+            y2={leaderTo.y}
+            stroke={stroke}
+            strokeWidth={1.5}
+          />
+        </svg>
+        <div
+          className="node__wedge-badge"
+          style={{
+            left: iconAnchor.x - badgeRadius,
+            top: iconAnchor.y - badgeRadius,
+            width: badgeRadius * 2,
+            height: badgeRadius * 2,
+            borderColor: stroke,
+          }}
+        >
+          {NodeIcon && <NodeIcon size={16} strokeWidth={1.8} color={stroke} />}
+        </div>
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="node__wedge-label-input nodrag"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => finishEditing(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                finishEditing(true);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                finishEditing(false);
+              }
+            }}
+            style={{ ...labelStyle, ...titleFormatStyle }}
+          />
+        ) : (
+          <div
+            className={`node__wedge-label ${onRight ? "node__wedge-label--right" : "node__wedge-label--left"}`}
+            style={labelStyle}
+          >
+            <div
+              className="node__wedge-label-title"
+              onDoubleClickCapture={editLabelOnDoubleClick}
+              style={titleFormatStyle}
+            >
+              {data.label}
+            </div>
+            {editingDesc ? (
+              <textarea
+                ref={descRef}
+                className="node__wedge-desc-input nodrag"
+                rows={3}
+                value={descDraft}
+                onChange={(event) => setDescDraft(event.target.value)}
+                onBlur={() => finishEditingDesc(true)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    finishEditingDesc(false);
+                  }
+                  // Enter is left alone — a description is free text and
+                  // reasonably wants real line breaks, unlike the one-line label.
+                }}
+                style={descFormatStyle}
+              />
+            ) : (
+              data.description && (
+                <div
+                  className="node__wedge-label-desc"
+                  onDoubleClickCapture={editDescOnDoubleClick}
+                  style={descFormatStyle}
+                >
+                  {data.description}
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Only a hub ever carries this — the shared `Color`/`Line`/`Font size`
+  // sections in StylePanel are hidden for it in favour of the same "Title
+  // text" section a wedge gets, since a hub is really just this same shared
+  // box shape with one piece of rich text on it.
+  const hubTitleFormat =
+    shape === "hub" ? textFormatStyle(data.style?.titleFormat as TextFormat | undefined) : undefined;
+
   return (
-    <div
-      className={`node node--${shape} node--kind-${data.kind} ${textOnly ? "node--text-only" : ""} ${selected ? "is-selected" : ""} ${data.justAdded ? "node--just-added" : ""}`}
+    <>
+      <div
+        className={`node node--${shape} node--kind-${data.kind} ${textOnly ? "node--text-only" : ""} ${selected ? "is-selected" : ""} ${data.justAdded ? "node--just-added" : ""}`}
       style={{
         width: data.width,
         height: data.height,
@@ -353,7 +466,11 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
         ...(typeof fontSize === "number" && { fontSize }),
       }}
       title={data.description ?? undefined}
-      onDoubleClick={(event) => {
+      // Capture, not bubble — see the wedge branch above for why: a locked
+      // (non-draggable) node's bubble-phase dblclick never reaches React's
+      // root dispatcher, so hub (also locked) needs this exact same fix.
+      // Harmless for every draggable kind too, so there's no need to branch.
+      onDoubleClickCapture={(event) => {
         if (data.imageUrl) return; // nothing to rename — the label isn't shown
         event.stopPropagation();
         setEditing(true);
@@ -389,6 +506,7 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
               finishEditing(false);
             }
           }}
+          style={hubTitleFormat}
         />
       ) : (
         <>
@@ -399,7 +517,9 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
               <NodeIcon size={18} strokeWidth={1.7} color={iconAccent} />
             </span>
           )}
-          <span className="node__label">{data.label}</span>
+          <span className="node__label" style={hubTitleFormat}>
+            {data.label}
+          </span>
         </>
       )}
       <Handle type="source" position={Position.Right} className="node__port" />
@@ -409,8 +529,15 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
         className="node__port"
         id="b"
       />
+      </div>
+      {/* The corners are a sibling of `.node`, not a child of it. clip-path —
+          the diamond, and every palette clip shape — clips the whole element's
+          paint, handles included, so as children they were invisible and
+          dead (the box corners sit outside every polygon). As a sibling they
+          land on the wrapper's containing box, which is exactly the node box,
+          so they sit in the same corners and stay draggable on every shape. */}
       {selected && <ResizeCorners onStart={beginResize} />}
-    </div>
+    </>
   );
 }
 
@@ -438,8 +565,80 @@ export function TitleBlock({ data }: NodeProps<FlowNode>) {
   );
 }
 
+/** A nested boundary box — a VNet, a subnet, an account. The body is
+ *  `pointer-events: none` in CSS so a container spanning half the canvas never
+ *  swallows clicks meant for the nodes drawn on top of it; only the header
+ *  strip is interactive. */
+export function GroupNode({ id, data, selected }: NodeProps<FlowNode>) {
+  const depth = typeof data.depth === "number" ? data.depth : 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(data.label);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(data.label);
+      requestAnimationFrame(() => inputRef.current?.select());
+    }
+  }, [editing, data.label]);
+
+  const commit = (save: boolean) => {
+    const trimmed = draft.trim();
+    if (save && trimmed) {
+      const current = useDiagram.getState().doc;
+      useDiagram.getState().setDoc(
+        {
+          ...current,
+          groups: (current.groups ?? []).map((g) =>
+            g.id === id.replace(/^group__/, "") ? { ...g, label: trimmed } : g,
+          ),
+        },
+        { silent: true },
+      );
+    }
+    setEditing(false);
+  };
+
+  return (
+    <div
+      className={`group-box ${selected ? "is-selected" : ""}`}
+      data-depth={Math.min(depth, 4)}
+      style={{ width: data.width, height: data.height }}
+    >
+      <div
+        className="group-box__header"
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          setEditing(true);
+        }}
+      >
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="group-box__input"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => commit(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commit(true);
+              if (event.key === "Escape") commit(false);
+              event.stopPropagation();
+            }}
+            // The header is the drag handle; a pointer-down here would start
+            // dragging the container instead of placing the caret.
+            onPointerDown={(event) => event.stopPropagation()}
+          />
+        ) : (
+          data.label
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const nodeTypes = {
   diagram: DiagramNode,
   lane: LaneNode,
   title: TitleBlock,
+  group: GroupNode,
 };

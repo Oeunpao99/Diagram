@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api/client";
@@ -13,7 +13,7 @@ import { useCanvasAssets } from "../hooks/useCanvasAssets";
 import { iconToDataUrl } from "../lib/iconToDataUrl";
 import { useDiagram } from "../store/useDiagram";
 import { ASSET_LIBRARY } from "./assetLibrary";
-import { ICON_CATALOG } from "./iconCatalog";
+import { ICON_CATALOG, type IconAsset } from "./iconCatalog";
 import {
   Alert,
   Check,
@@ -21,10 +21,12 @@ import {
   CircleDot,
   ExtractNote,
   FileImage,
+  Grid,
   Layers,
   Plus,
   Search,
   Sparkles,
+  Square,
   Trash,
   Upload,
 } from "./icons";
@@ -430,9 +432,54 @@ function TemplatesPane() {
 
 /* ------------------------------------------------------------------ assets */
 
+type AssetTab = "shapes" | "icons" | "image";
+type IconFilter =
+  | "all"
+  | IconAsset["category"]
+  | "aws"
+  | "azure";
+
+const ICON_FILTERS: { key: IconFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "business", label: "Business" },
+  { key: "it", label: "IT" },
+  { key: "data", label: "Data" },
+  { key: "logistics", label: "Logistics" },
+  { key: "general", label: "General" },
+  { key: "aws", label: "AWS" },
+  { key: "azure", label: "Azure" },
+];
+
+const iconFilterOf = (asset: IconAsset): IconFilter => {
+  if (asset.key.startsWith("aws-")) return "aws";
+  if (asset.key.startsWith("az-")) return "azure";
+  return asset.category;
+};
+
+const RECENT_KEY = "diagramcopilot.recent-icons";
+function loadRecentIcons(): string[] {
+  try {
+    const stored = localStorage.getItem(RECENT_KEY);
+    const parsed = stored ? (JSON.parse(stored) as unknown) : null;
+    return Array.isArray(parsed)
+      ? parsed.filter((k): k is string => typeof k === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+function saveRecentIcons(keys: string[]) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(keys));
+  } catch {
+    // private mode / quota — the session just won't remember recents
+  }
+}
+
 function AssetsPane() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [tab, setTab] = useState<AssetTab>("icons");
   const { addShape, addImage, addImageDataUrl } = useCanvasAssets();
   // Select the stable `nodes` reference and filter in a memo — filtering
   // inline inside the selector hands zustand a new array every render, which
@@ -449,23 +496,61 @@ function AssetsPane() {
   } | null>(null);
 
   const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryFilter, setLibraryFilter] = useState<IconFilter>("all");
+  const [recentKeys, setRecentKeys] = useState<string[]>(loadRecentIcons);
+
   const libraryNeedle = libraryQuery.trim().toLowerCase();
   const filteredIcons = useMemo(() => {
-    if (!libraryNeedle) return ICON_CATALOG;
-    return ICON_CATALOG.filter((asset) =>
-      [asset.label, asset.category]
+    return ICON_CATALOG.filter((asset) => {
+      if (libraryFilter !== "all" && iconFilterOf(asset) !== libraryFilter)
+        return false;
+      if (!libraryNeedle) return true;
+      return [asset.label, asset.category]
         .concat(asset.keywords)
         .join(" ")
         .toLowerCase()
-        .includes(libraryNeedle),
-    );
-  }, [libraryNeedle]);
+        .includes(libraryNeedle);
+    });
+  }, [libraryFilter, libraryNeedle]);
 
-  const addLibraryIcon = (asset: (typeof ICON_CATALOG)[number]) =>
+  const recentAssets = useMemo(() => {
+    const byKey = new Map(ICON_CATALOG.map((asset) => [asset.key, asset]));
+    return recentKeys
+      .map((key) => byKey.get(key))
+      .filter((asset): asset is IconAsset => Boolean(asset));
+  }, [recentKeys]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<IconFilter, number> = {
+      all: ICON_CATALOG.length,
+      business: 0,
+      it: 0,
+      data: 0,
+      logistics: 0,
+      general: 0,
+      cloud: 0,
+      aws: 0,
+      azure: 0,
+    };
+    for (const asset of ICON_CATALOG) counts[iconFilterOf(asset)] += 1;
+    return counts;
+  }, []);
+
+  const recordRecent = (key: string) => {
+    setRecentKeys((prev) => {
+      const next = [key, ...prev.filter((k) => k !== key)].slice(0, 10);
+      saveRecentIcons(next);
+      return next;
+    });
+  };
+
+  const addLibraryIcon = (asset: IconAsset) => {
+    recordRecent(asset.key);
     addImageDataUrl(iconToDataUrl(asset.Icon), asset.label, undefined, {
       width: 56,
       height: 56,
     });
+  };
 
   const onFiles = (files: FileList | null) => {
     const file = files?.[0];
@@ -502,207 +587,292 @@ function AssetsPane() {
     setIconPrompt("");
   };
 
+  const tabBtn = (key: AssetTab, label: string, icon: ReactNode) => (
+    <button
+      role="tab"
+      aria-selected={tab === key}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-[7px] border-none px-1.5 py-[5px] text-[11px] font-[650] tracking-[0.01em] transition-colors [&_svg]:size-[12px] ${tab === key ? "bg-green-soft text-green-strong shadow-2" : "text-slate hover:bg-surface hover:text-ink"}`}
+      onClick={() => setTab(key)}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div
-        className={`cursor-pointer rounded-xl border-[1.5px] border-dashed border-line-strong bg-paper p-[22px] text-center transition-colors hover:border-green hover:bg-green-soft [&_svg]:mx-auto [&_svg]:size-5 [&_svg]:text-green ${dragOver ? "border-green bg-green-soft" : ""}`}
-        role="button"
-        tabIndex={0}
-        onClick={() => fileRef.current?.click()}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ")
-            fileRef.current?.click();
-        }}
-        onDragOver={(event) => {
-          event.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(event) => {
-          event.preventDefault();
-          setDragOver(false);
-          onFiles(event.dataTransfer.files);
-        }}
+        className="mb-3 grid shrink-0 grid-cols-3 gap-[3px] rounded-xl border border-line bg-surface-2 p-[3px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.035)]"
+        role="tablist"
+        aria-label="What to add"
       >
-        <Upload />
-        <p className="mb-0.5 mt-[9px] text-[12.5px] font-semibold text-ink">
-          Upload image
-        </p>
-        <small className="text-[11px] leading-[1.4] text-slate">
-          Drag &amp; drop, or click to browse · PNG, JPG, SVG
-        </small>
+        {tabBtn("shapes", "Shapes", <Square />)}
+        {tabBtn("icons", "Icons", <Grid />)}
+        {tabBtn("image", "Image", <Upload />)}
       </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(event) => {
-          onFiles(event.target.files);
-          event.target.value = "";
-        }}
-      />
 
-      <div className="border-b border-line pb-[9px] last:border-b-0">
-        <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
-          <Sparkles /> Generate an icon
-        </p>
-        <div className="mt-2 space-y-1.5">
-          <input
-            value={iconPrompt}
-            onChange={(event) => setIconPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void generateIcon();
-              }
-            }}
-            placeholder="e.g. a padlock, a forklift…"
-            className="w-full rounded-md border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-slate-soft focus-visible:border-green"
-          />
-          <button
-            type="button"
-            onClick={() => void generateIcon()}
-            disabled={!iconPrompt.trim() || iconBusy}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-green bg-green px-3 py-2 text-[12.5px] font-semibold text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {iconBusy ? (
-              <span className="icon-gen__spin" aria-hidden="true" />
-            ) : (
-              "Generate icon"
-            )}
-          </button>
-        </div>
-
-        {iconError && (
-          <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-[550] text-red">
-            <Alert /> {iconError}
+      {tab === "shapes" && (
+        <div>
+          <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+            <Sparkles /> Shapes
           </p>
-        )}
-
-        {iconResult && (
-          <div className="mt-2 flex items-center gap-2.5 rounded-md border border-line bg-surface p-1.5">
-            <span
-              className="h-[42px] w-[42px] shrink-0 rounded-[6px] border border-line bg-paper bg-contain bg-center bg-no-repeat p-1.5"
-              style={{ backgroundImage: `url(${iconDataUrl(iconResult.svg)})` }}
-              aria-hidden="true"
-            />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
-              {iconResult.prompt}
-            </span>
-            <button
-              type="button"
-              onClick={addIconToCanvas}
-              className="shrink-0 rounded-md border border-green bg-green-soft px-2 py-1 text-[11.5px] font-semibold text-green transition-colors hover:bg-green hover:text-white"
-            >
-              Add to canvas
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="border-b border-line pb-[9px] last:border-b-0">
-        <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
-          <Sparkles /> Shapes
-        </p>
-        <div className="mt-2 grid grid-cols-4 gap-[7px]">
-          {ASSET_LIBRARY.map((asset) => (
-            <button
-              key={asset.kind}
-              className="grid aspect-square cursor-grab place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[17px]"
-              title={`${asset.label} — click or drag onto the canvas`}
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.setData(
-                  "application/copilot-asset",
-                  asset.kind,
-                );
-                event.dataTransfer.effectAllowed = "copy";
-              }}
-              onClick={() => addShape(asset.kind, asset.label)}
-            >
-              {asset.icon()}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="border-b border-line pb-[9px] last:border-b-0">
-        <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
-          <Sparkles /> Icon library
-        </p>
-        <label className="relative mt-2 block">
-          <span className="pointer-events-none absolute left-[9px] top-1/2 -translate-y-1/2 text-slate-soft [&_svg]:size-[13px]">
-            <Search />
-          </span>
-          <input
-            type="search"
-            value={libraryQuery}
-            onChange={(event) => setLibraryQuery(event.target.value)}
-            placeholder="Search icons… (cloud, truck, lock…)"
-            className="w-full rounded-md border border-line bg-paper py-[7px] pl-[27px] pr-2.5 text-[12px] text-ink outline-none transition-[border-color,background,box-shadow] placeholder:text-slate-soft focus:border-green focus:bg-surface focus:shadow-[0_0_0_3px_var(--green-ring)]"
-            aria-label="Search icon library"
-          />
-        </label>
-
-        {filteredIcons.length === 0 ? (
-          <p className="m-0 mt-2 text-xs leading-[1.5] text-slate">
-            Nothing matches &ldquo;{libraryQuery}&rdquo;.
-          </p>
-        ) : (
-          <div className="mt-2 grid max-h-[280px] grid-cols-4 gap-[7px] overflow-y-auto pr-0.5">
-            {filteredIcons.map((asset) => (
+          <div className="mt-2 grid grid-cols-4 gap-[7px]">
+            {ASSET_LIBRARY.map((asset) => (
               <button
-                key={asset.key}
-                className="grid aspect-square cursor-grab place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[16px]"
+                key={asset.kind}
+                className="grid aspect-square cursor-grab place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[17px]"
                 title={`${asset.label} — click or drag onto the canvas`}
                 draggable
                 onDragStart={(event) => {
                   event.dataTransfer.setData(
-                    "application/copilot-icon",
-                    asset.key,
+                    "application/copilot-asset",
+                    asset.kind,
                   );
                   event.dataTransfer.effectAllowed = "copy";
                 }}
-                onClick={() => addLibraryIcon(asset)}
+                onClick={() => addShape(asset.kind, asset.label, undefined, asset.size)}
               >
-                <asset.Icon size={16} strokeWidth={1.7} />
+                {asset.icon()}
               </button>
             ))}
           </div>
-        )}
-      </div>
-
-      {images.length > 0 && (
-        <div className="border-b border-line pb-[9px] last:border-b-0">
-          <p className="mx-0.5 mt-1 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
-            In this diagram
+          <p className="m-0 mt-1.5 text-[10.5px] leading-[1.45] text-slate-soft">
+            Click a shape to add it, or drag it onto the canvas.
           </p>
-          <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
-            {images.map((node) => (
-              <li
-                key={node.id}
-                className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-surface-2"
-              >
-                <span
-                  className="h-[30px] w-[42px] shrink-0 rounded-[6px] border border-line bg-paper bg-cover bg-center"
-                  style={{ backgroundImage: `url(${node.image_url})` }}
-                  aria-hidden="true"
-                />
-                <span className="flex min-w-0 flex-col gap-px">
-                  <b className="truncate text-[12.5px] font-medium text-ink">
-                    {node.label}
-                  </b>
-                  <small className="text-[11px] text-slate-soft">
-                    {node.size.width} × {node.size.height} · on canvas
-                  </small>
-                </span>
-              </li>
-            ))}
-          </ul>
         </div>
       )}
-    </>
+
+      {tab === "icons" && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <label className="relative block shrink-0">
+            <span className="pointer-events-none absolute left-[9px] top-1/2 -translate-y-1/2 text-slate-soft [&_svg]:size-[13px]">
+              <Search />
+            </span>
+            <input
+              type="search"
+              value={libraryQuery}
+              onChange={(event) => setLibraryQuery(event.target.value)}
+              placeholder="Search icons… (cloud, truck, lock…)"
+              className="w-full rounded-md border border-line bg-paper py-[7px] pl-[27px] pr-2.5 text-[12px] text-ink outline-none transition-[border-color,background,box-shadow] placeholder:text-slate-soft focus:border-green focus:bg-surface focus:shadow-[0_0_0_3px_var(--green-ring)]"
+              aria-label="Search icon library"
+            />
+          </label>
+
+          <div className="no-scrollbar -mx-0.5 mt-2 flex shrink-0 gap-1 overflow-x-auto px-0.5 pb-0.5">
+            {ICON_FILTERS.map((filter) => {
+              const count = categoryCounts[filter.key];
+              const active = libraryFilter === filter.key;
+              return (
+                <button
+                  key={filter.key}
+                  aria-pressed={active}
+                  className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-[600] leading-none transition-colors ${active ? "border-green-line bg-green-soft text-green-strong" : "border-line bg-surface text-slate hover:border-line-strong hover:text-ink"}`}
+                  onClick={() => setLibraryFilter(filter.key)}
+                >
+                  {filter.label}
+                  <span
+                    className={`text-[9.5px] font-[550] ${active ? "text-green" : "text-slate-soft"}`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {recentAssets.length > 0 && (
+            <div className="mt-2.5 shrink-0">
+              <p className="mx-0.5 flex items-center justify-between text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+                Recently used
+                <button
+                  className="border-none bg-transparent p-0 text-[10px] font-[550] text-slate-soft underline hover:text-red"
+                  onClick={() => {
+                    setRecentKeys([]);
+                    saveRecentIcons([]);
+                  }}
+                >
+                  Clear
+                </button>
+              </p>
+              <div className="mt-1.5 grid grid-cols-8 gap-[5px]">
+                {recentAssets.map((asset) => (
+                  <button
+                    key={asset.key}
+                    className="grid aspect-square cursor-pointer place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green [&_svg]:size-4"
+                    title={`${asset.label} — click to add again`}
+                    onClick={() => addLibraryIcon(asset)}
+                  >
+                    <asset.Icon size={16} strokeWidth={1.7} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="mx-0.5 mt-2.5 shrink-0 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+            Icon library
+          </p>
+
+          {filteredIcons.length === 0 ? (
+            <p className="m-0 mt-2 text-xs leading-[1.5] text-slate">
+              Nothing matches &ldquo;{libraryQuery}&rdquo;.
+            </p>
+          ) : (
+            <div className="mt-1.5 grid min-h-0 flex-1 grid-cols-4 content-start gap-[7px] overflow-y-auto pb-1 pr-0.5 no-scrollbar">
+              {filteredIcons.map((asset) => (
+                <button
+                  key={asset.key}
+                  className="grid aspect-square cursor-grab place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[16px]"
+                  title={`${asset.label} — click or drag onto the canvas`}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(
+                      "application/copilot-icon",
+                      asset.key,
+                    );
+                    event.dataTransfer.effectAllowed = "copy";
+                  }}
+                  onClick={() => addLibraryIcon(asset)}
+                >
+                  <asset.Icon size={16} strokeWidth={1.7} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "image" && (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pb-1 no-scrollbar">
+          <div
+            className={`cursor-pointer rounded-xl border-[1.5px] border-dashed border-line-strong bg-paper p-[22px] text-center transition-colors hover:border-green hover:bg-green-soft [&_svg]:mx-auto [&_svg]:size-5 [&_svg]:text-green ${dragOver ? "border-green bg-green-soft" : ""}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => fileRef.current?.click()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ")
+                fileRef.current?.click();
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragOver(false);
+              onFiles(event.dataTransfer.files);
+            }}
+          >
+            <Upload />
+            <p className="mb-0.5 mt-[9px] text-[12.5px] font-semibold text-ink">
+              Upload image
+            </p>
+            <small className="text-[11px] leading-[1.4] text-slate">
+              Drag &amp; drop, or click to browse · PNG, JPG, SVG
+            </small>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => {
+              onFiles(event.target.files);
+              event.target.value = "";
+            }}
+          />
+
+          <div>
+            <p className="mx-0.5 mt-1 flex items-center gap-1.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+              <Sparkles /> Generate an icon
+            </p>
+            <div className="mt-2 space-y-1.5">
+              <input
+                value={iconPrompt}
+                onChange={(event) => setIconPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void generateIcon();
+                  }
+                }}
+                placeholder="e.g. a padlock, a forklift…"
+                className="w-full rounded-md border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none placeholder:text-slate-soft focus-visible:border-green"
+              />
+              <button
+                type="button"
+                onClick={() => void generateIcon()}
+                disabled={!iconPrompt.trim() || iconBusy}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-green bg-green px-3 py-2 text-[12.5px] font-semibold text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {iconBusy ? (
+                  <span className="icon-gen__spin" aria-hidden="true" />
+                ) : (
+                  "Generate icon"
+                )}
+              </button>
+            </div>
+
+            {iconError && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] font-[550] text-red">
+                <Alert /> {iconError}
+              </p>
+            )}
+
+            {iconResult && (
+              <div className="mt-2 flex items-center gap-2.5 rounded-md border border-line bg-surface p-1.5">
+                <span
+                  className="h-[42px] w-[42px] shrink-0 rounded-[6px] border border-line bg-paper bg-contain bg-center bg-no-repeat p-1.5"
+                  style={{ backgroundImage: `url(${iconDataUrl(iconResult.svg)})` }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
+                  {iconResult.prompt}
+                </span>
+                <button
+                  type="button"
+                  onClick={addIconToCanvas}
+                  className="shrink-0 rounded-md border border-green bg-green-soft px-2 py-1 text-[11.5px] font-semibold text-green transition-colors hover:bg-green hover:text-white"
+                >
+                  Add to canvas
+                </button>
+              </div>
+            )}
+          </div>
+
+          {images.length > 0 && (
+            <div>
+              <p className="mx-0.5 mt-3.5 text-[10.5px] font-[650] uppercase tracking-[0.07em] text-slate-soft">
+                In this diagram
+              </p>
+              <ul className="m-0 mt-1.5 flex list-none flex-col gap-1 p-0">
+                {images.map((node) => (
+                  <li
+                    key={node.id}
+                    className="flex items-center gap-2.5 rounded-md p-1.5 hover:bg-surface-2"
+                  >
+                    <span
+                      className="h-[30px] w-[42px] shrink-0 rounded-[6px] border border-line bg-paper bg-cover bg-center"
+                      style={{ backgroundImage: `url(${node.image_url})` }}
+                      aria-hidden="true"
+                    />
+                    <span className="flex min-w-0 flex-col gap-px">
+                      <b className="truncate text-[12.5px] font-medium text-ink">
+                        {node.label}
+                      </b>
+                      <small className="text-[11px] text-slate-soft">
+                        {node.size.width} × {node.size.height} · on canvas
+                      </small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

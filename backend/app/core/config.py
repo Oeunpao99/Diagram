@@ -31,6 +31,17 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173"
 
+    # --- Social sign-in -----------------------------------------------------
+    # All optional: an unset provider's /auth/{provider} route answers 501
+    # rather than the app refusing to boot, so partial setup is fine.
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
+    # sha256(this) is the HMAC key Telegram signs widget payloads with — never
+    # sent to the frontend, unlike the client ids above.
+    telegram_bot_token: str | None = None
+
     @property
     def fast_deployment(self) -> str:
         return self.azure_openai_fast_deployment or self.azure_openai_deployment

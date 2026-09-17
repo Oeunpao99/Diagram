@@ -1,0 +1,326 @@
+{
+  "aws": [
+    [
+      "aws-ec2",
+      "EC2"
+    ],
+    [
+      "aws-lambda",
+      "Lambda"
+    ],
+    [
+      "aws-ecs",
+      "Elastic Container Service"
+    ],
+    [
+      "aws-eks",
+      "Elastic Kubernetes Service"
+    ],
+    [
+      "aws-s3",
+      "S3"
+    ],
+    [
+      "aws-rds",
+      "RDS"
+    ],
+    [
+      "aws-dynamodb",
+      "DynamoDB"
+    ],
+    [
+      "aws-elasticache",
+      "ElastiCache"
+    ],
+    [
+      "aws-route53",
+      "Route 53"
+    ],
+    [
+      "aws-elb",
+      "Elastic Load Balancing"
+    ],
+    [
+      "aws-cloudfront",
+      "CloudFront"
+    ],
+    [
+      "aws-api-gateway",
+      "API Gateway"
+    ],
+    [
+      "aws-vpc",
+      "VPC"
+    ],
+    [
+      "aws-iam",
+      "IAM"
+    ],
+    [
+      "aws-sqs",
+      "SQS"
+    ],
+    [
+      "aws-sns",
+      "SNS"
+    ],
+    [
+      "aws-cloudwatch",
+      "CloudWatch"
+    ],
+    [
+      "aws-fargate",
+      "Fargate"
+    ],
+    [
+      "aws-aurora",
+      "Aurora"
+    ],
+    [
+      "aws-step-functions",
+      "Step Functions"
+    ],
+    [
+      "aws-eventbridge",
+      "EventBridge"
+    ],
+    [
+      "aws-cloudformation",
+      "CloudFormation"
+    ],
+    [
+      "aws-kms",
+      "Key Management Service"
+    ],
+    [
+      "aws-secrets-manager",
+      "Secrets Manager"
+    ],
+    [
+      "aws-waf",
+      "WAF"
+    ],
+    [
+      "aws-cognito",
+      "Cognito"
+    ],
+    [
+      "aws-redshift",
+      "Redshift"
+    ],
+    [
+      "aws-kinesis",
+      "Kinesis"
+    ],
+    [
+      "aws-glue",
+      "Glue"
+    ],
+    [
+      "aws-sagemaker",
+      "SageMaker"
+    ],
+    [
+      "aws-bedrock",
+      "Bedrock"
+    ],
+    [
+      "aws-auto-scaling",
+      "Auto Scaling"
+    ],
+    [
+      "aws-ebs",
+      "EBS"
+    ],
+    [
+      "aws-elastic-beanstalk",
+      "Elastic Beanstalk"
+    ],
+    [
+      "aws-efs",
+      "EFS"
+    ],
+    [
+      "aws-direct-connect",
+      "Direct Connect"
+    ],
+    [
+      "aws-transit-gateway",
+      "Transit Gateway"
+    ],
+    [
+      "aws-athena",
+      "Athena"
+    ],
+    [
+      "aws-msk",
+      "Managed Streaming for Kafka"
+    ],
+    [
+      "aws-app-runner",
+      "App Runner"
+    ],
+    [
+      "aws-ecr",
+      "Elastic Container Registry"
+    ]
+  ],
+  "azure": [
+    [
+      "az-virtual-machine",
+      "Virtual Machine"
+    ],
+    [
+      "az-function-apps",
+      "Function Apps"
+    ],
+    [
+      "az-app-services",
+      "App Services"
+    ],
+    [
+      "az-container-instances",
+      "Container Instances"
+    ],
+    [
+      "az-aks",
+      "Kubernetes Services (AKS)"
+    ],
+    [
+      "az-storage-accounts",
+      "Storage Accounts"
+    ],
+    [
+      "az-sql-database",
+      "SQL Database"
+    ],
+    [
+      "az-cosmos-db",
+      "Cosmos DB"
+    ],
+    [
+      "az-cache-redis",
+      "Cache for Redis"
+    ],
+    [
+      "az-dns-zones",
+      "DNS Zones"
+    ],
+    [
+      "az-load-balancers",
+      "Load Balancers"
+    ],
+    [
+      "az-front-door-cdn",
+      "Front Door & CDN"
+    ],
+    [
+      "az-api-management",
+      "API Management"
+    ],
+    [
+      "az-virtual-networks",
+      "Virtual Networks"
+    ],
+    [
+      "az-managed-identities",
+      "Managed Identities"
+    ],
+    [
+      "az-storage-queue",
+      "Storage Queue"
+    ],
+    [
+      "az-service-bus",
+      "Service Bus"
+    ],
+    [
+      "az-monitor",
+      "Monitor"
+    ],
+    [
+      "az-container-registries",
+      "Container Registries"
+    ],
+    [
+      "az-application-gateways",
+      "Application Gateway"
+    ],
+    [
+      "az-logic-apps",
+      "Logic Apps"
+    ],
+    [
+      "az-event-grid-topics",
+      "Event Grid Topics"
+    ],
+    [
+      "az-key-vaults",
+      "Key Vaults"
+    ],
+    [
+      "az-application-insights",
+      "Application Insights"
+    ],
+    [
+      "az-firewalls",
+      "Firewall"
+    ],
+    [
+      "az-sql-data-warehouses",
+      "SQL Data Warehouse"
+    ],
+    [
+      "az-stream-analytics",
+      "Stream Analytics"
+    ],
+    [
+      "az-data-factories",
+      "Data Factory"
+    ],
+    [
+      "az-machine-learning",
+      "Machine Learning"
+    ],
+    [
+      "az-openai",
+      "OpenAI Service"
+    ],
+    [
+      "az-batch-accounts",
+      "Batch Accounts"
+    ],
+    [
+      "az-disks",
+      "Disks"
+    ],
+    [
+      "az-app-service-plans",
+      "App Service Plans"
+    ],
+    [
+      "az-expressroute",
+      "ExpressRoute Circuits"
+    ],
+    [
+      "az-traffic-manager",
+      "Traffic Manager"
+    ],
+    [
+      "az-data-lake-storage",
+      "Data Lake Storage"
+    ],
+    [
+      "az-event-hubs",
+      "Event Hubs"
+    ],
+    [
+      "az-bastions",
+      "Bastion"
+    ],
+    [
+      "az-automation-accounts",
+      "Automation Accounts"
+    ]
+  ]
+}

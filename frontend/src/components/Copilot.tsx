@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
 
 import { usePanelCollapse, usePanelResize } from "../hooks/usePanelResize";
+import { matchSlashCommands } from "../lib/slashCommands";
 import { useDiagram } from "../store/useDiagram";
+import { AiTodoList } from "./AiTodoList";
 import {
   Alert,
   ArrowRight,
+  CheckCircle,
   ChevronLeft,
   ChevronRight,
   ImageIcon,
@@ -14,22 +18,15 @@ import {
   UserIcon,
   X,
 } from "./icons";
+import { SlashCommandMenu } from "./SlashCommandMenu";
+import { timeAgo } from "./templateVisuals";
 
 const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url cap with room to spare
 
-interface Msg {
-  id: number;
-  role: "user" | "ai";
-  text: string;
-}
-
-/** Ideas to prime an empty canvas — real prompts a user could actually send. */
-const STARTER_IDEAS = [
-  "Employee onboarding process",
-  "Customer support ticket flow",
-  "Import cargo clearance process",
-  "Microservice deployment pipeline",
-];
+/** Ideas to prime an empty canvas — real prompts a user could actually send.
+ *  Kept short: one business-process example, one technical one, enough to
+ *  show the range without turning into a wall of chips. */
+const STARTER_IDEAS = ["Employee onboarding process", "Microservice deployment pipeline"];
 
 /** Once a diagram exists, these describe edits instead — one per thing the
  *  agent can do, so the range is discoverable without reading docs: a
@@ -42,17 +39,10 @@ const EDIT_SUGGESTIONS = [
   "Give me ideas to improve this",
 ];
 
-function uid(): number {
-  return Date.now() + Math.floor(Math.random() * 1e5);
-}
-
-/** A capped bullet list, with a tail line when there was more than fits. */
-function bullets(lines: string[], limit: number): string {
-  const shown = lines.slice(0, limit).map((line) => `  • ${line}`);
-  const rest = lines.length - shown.length;
-  if (rest > 0) shown.push(`  • …and ${rest} more`);
-  return shown.join("\n");
-}
+/** How many of the most recent chat messages ride along with a new one, so
+ *  a short reply ("all", "yes") can resolve against the agent's own
+ *  previous question — see sendEdit. */
+const HISTORY_TURNS = 8;
 
 /** "process_flow" -> "Process Flow" */
 function formatType(value: string): string {
@@ -65,7 +55,6 @@ function formatType(value: string): string {
 /* --------------------------------------------------------------- copilot */
 
 export function Copilot() {
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [showImproved, setShowImproved] = useState(false);
   const [pendingText, setPendingText] = useState<string | null>(null);
@@ -74,14 +63,29 @@ export function Copilot() {
   );
   const [attachError, setAttachError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [slashHighlight, setSlashHighlight] = useState(0);
+  const [sessionInfo, setSessionInfo] = useState(false);
   const tailRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const resize = usePanelResize();
   const { collapsed, toggle: toggleCollapsed } = usePanelCollapse();
 
+  const messages = useDiagram((s) => s.messages);
+  const appendMessage = useDiagram((s) => s.appendMessage);
+  const clearMessages = useDiagram((s) => s.clearMessages);
+  const undo = useDiagram((s) => s.undo);
+  const redo = useDiagram((s) => s.redo);
   const busy = useDiagram((s) => s.busy);
   const editPhase = useDiagram((s) => s.editPhase);
+  const editSteps = useDiagram((s) => s.editSteps);
+  // Set (and cleared) by Canvas.tsx's rehearsal — see the store's own doc
+  // comment. Gates the "done" summary below so it doesn't show up before
+  // the diagram has visibly finished sketching itself in, and drives the
+  // live "drawing X" line while it's still going.
+  const rehearsing = useDiagram((s) => s.rehearsing);
+  const generationProgress = useDiagram((s) => s.generationProgress);
+  const generationPlan = useDiagram((s) => s.generationPlan);
   const improved = useDiagram((s) => s.improved);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
   const improvePrompt = useDiagram((s) => s.improvePrompt);
@@ -99,37 +103,67 @@ export function Copilot() {
     el.style.height = `${Math.min(el.scrollHeight, 176)}px`;
   }, [input]);
 
-  const appendMessage = (msg: Omit<Msg, "id">) =>
-    setMessages((current) => [...current, { id: uid(), ...msg }]);
+  // "/" as the composer's very first character, with nothing typed after a
+  // space yet, is read as a command in progress — matchSlashCommands([])
+  // (an empty query) lists every command, narrowing as more is typed.
+  const slashQuery = input.startsWith("/") && !input.includes(" ") ? input.slice(1) : null;
+  const slashMatches = slashQuery !== null ? matchSlashCommands(slashQuery) : [];
 
-  // Acknowledge a finished send once `busy` settles back to idle. The agent
-  // can come back with any combination of three things: something to say, a
-  // list of what it changed, and a list of what it couldn't — a question is
-  // just the first on its own, a clean edit the second.
+  useEffect(() => setSlashHighlight(0), [slashQuery]);
+
+  const runSlashCommand = (cmd: string) => {
+    setInput("");
+    setSlashHighlight(0);
+    if (cmd === "/new") void clearMessages();
+    else if (cmd === "/session") setSessionInfo(true);
+    else if (cmd === "/undo") undo();
+    else if (cmd === "/redo") redo();
+    else if (cmd === "/explain") sendEdit("Explain this diagram");
+  };
+
+  // Acknowledge a finished send once `busy` settles back to idle *and* any
+  // rehearsal has actually finished playing — a generate/layout clears
+  // `busy` well before the sketch even starts (see the store's `rehearsing`
+  // doc comment), so gating on `busy` alone would show this summary while
+  // the canvas is still blank or mid-drawing. The agent can come back with
+  // any combination of three things: something to say, a list of what it
+  // changed, and a list of what it couldn't — a question is just the first
+  // on its own, a clean edit the second.
   useEffect(() => {
-    if (!pendingText || busy !== null) return;
+    if (!pendingText || busy !== null || rehearsing) return;
     const { chatAnswer, changeLog, chatWarnings } = useDiagram.getState();
 
-    const parts: string[] = [];
-    if (chatAnswer) parts.push(chatAnswer);
-    if (changeLog.length > 0) {
-      parts.push(
-        (chatAnswer ? "" : "Done. I made these changes:\n") + bullets(changeLog, 6),
-      );
-    }
-    if (chatWarnings.length > 0) {
-      parts.push(`I couldn't do all of it:\n${bullets(chatWarnings, 4)}`);
-    }
-
-    appendMessage({ role: "ai", text: parts.join("\n\n") || pendingText });
-    useDiagram.setState({ chatAnswer: null, chatWarnings: [] });
+    // The agent can come back with three things: what it did (changeLog), a
+    // few things it couldn't (chatWarnings), and a one-sentence summary of
+    // it all (chatAnswer). "ask" answers are just the last on their own; a
+    // clean edit is the first two. They render as a checked list, not plain
+    // markdown bullets — the same changelog the live feed showed, so the
+    // done-message reads as one coherent record of the run.
+    const changes = changeLog.slice(0, 8);
+    const warnings = chatWarnings.slice(0, 6);
+    appendMessage({
+      role: "ai",
+      text: chatAnswer || (changes.length > 0 ? "Done — here's what changed:" : pendingText),
+      ...(changes.length > 0 ? { changes } : null),
+      ...(warnings.length > 0 ? { warnings } : null),
+    });
+    // Each message's changelog is captured above (into `changes`) exactly
+    // once — clearing it here (not just chatAnswer/chatWarnings) stops it
+    // from being re-attached to the *next* message too, which is what made
+    // a plain follow-up question inherit an old changelog and get rendered
+    // as a finished-edit card (plain text, no Markdown) instead of a normal
+    // prose answer.
+    useDiagram.setState({ chatAnswer: null, chatWarnings: [], changeLog: [] });
     setPendingText(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, pendingText]);
+  }, [busy, pendingText, rehearsing]);
 
   useEffect(() => {
     tailRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [messages, improved]);
+    // generationProgress/generationPlan: keeps the live drawing todo list in
+    // view as it updates shape by shape, not just when a real message is
+    // appended.
+  }, [messages, improved, generationProgress, generationPlan]);
 
   useEffect(() => {
     const onFocus = (event: Event) => {
@@ -168,13 +202,18 @@ export function Copilot() {
    *  which before anything touches the diagram. */
   const sendEdit = (text: string) => {
     if (!text.trim() || busy !== null || !hasNodes) return;
+    // The last few turns, from *before* this new message — enough for a
+    // short reply ("all", "yes") to resolve against the agent's own
+    // previous question without dragging the whole conversation along.
+    const history = messages.slice(-HISTORY_TURNS).map(({ role, text: t }) => ({ role, text: t }));
     appendMessage({ role: "user", text });
     setPendingText("The edit is applied to the diagram.");
-    void sendChatMessage(text);
+    void sendChatMessage(text, history);
     setInput("");
   };
 
   const send = () => {
+    if (slashMatches.length > 0) return runSlashCommand(slashMatches[slashHighlight].cmd);
     if (hasNodes) return sendEdit(input);
     if (attachedImage) return sendImage(attachedImage, input);
     return sendDescribe(input);
@@ -274,22 +313,137 @@ export function Copilot() {
             </span>
             {/* The user's own message keeps its bubble so you can pick your
                 turns out at a glance; the AI's reply is bare text — a border
-                around every answer just boxes in the thing you're reading. */}
-            <div className={`min-w-0 text-[12.5px] leading-[1.5] ${message.role === "user" ? "max-w-[78%] rounded-[11px] rounded-br-[4px] bg-green px-[11px] py-[9px] text-on-accent" : "max-w-full whitespace-pre-wrap py-[5px] text-ink"}`}>
-              {message.text}
+                around every answer just boxes in the thing you're reading.
+                Only the AI's side goes through Markdown — the user's own
+                text is literal, not something to interpret as formatting
+                syntax they may not have intended (a stray "*" or "-"
+                shouldn't turn into emphasis or a list).
+                `chat-stream` (a plain prose reply only — the changelog card
+                already streams in its own way, one line at a time via
+                `.chat-in`, so sweeping the whole card too would animate it
+                twice over) sweeps the text in left-to-right, the same
+                "still arriving" feel a live token stream has, even though
+                this whole answer actually landed in one response. */}
+            <div
+              className={`min-w-0 text-[11.5px] leading-[1.5] ${
+                message.role === "user"
+                  ? "max-w-[78%] whitespace-pre-wrap rounded-[11px] rounded-br-[4px] bg-green px-[11px] py-[9px] text-on-accent"
+                  : // Capped the same 78% as the user's own bubble above — a
+                    // long reply used to be free to run all the way to the
+                    // row's true right edge (past where a short user message
+                    // like "hello" ever reaches), which read as lopsided.
+                    // Both sides now share one right boundary.
+                    `chat-markdown max-w-[78%] py-[5px] text-ink${message.changes?.length ? "" : " chat-stream"}`
+              }`}
+            >
+              {message.role === "ai" && message.changes?.length ? (
+                // A finished edit: the summary sentence up top, then the real
+                // changelog as a card — the same treatment `improved`'s own
+                // "Structured analysis" card already uses below, so a change
+                // summary reads as a designed piece of the app rather than
+                // list items floating loose in a paragraph, and the two
+                // "here's a structured thing the AI produced" moments in this
+                // panel don't look like they belong to two different apps.
+                // The checklist itself is the same lines the live feed
+                // walked through — done reads as that run's own record, not
+                // a second, differently-worded retelling. Warnings get their
+                // own amber-tinted section so a partial success can't be
+                // mistaken for a complete one.
+                <div>
+                  {message.text && (
+                    // The agent's one-sentence summary often carries the same
+                    // **bold**-a-label habit its full answers do (nothing
+                    // stops it, even though only "ask" answers are told to
+                    // format that way) — rendered as Markdown here too, same
+                    // as the plain-answer branch below, instead of showing
+                    // the raw asterisks literally.
+                    <div>
+                      <Markdown>{message.text}</Markdown>
+                    </div>
+                  )}
+                  <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
+                    <div className="flex items-center gap-1.5 border-b border-line bg-surface-2 px-[11px] py-[9px] text-[11px] font-[650] text-ink">
+                      <span className="grid size-4 shrink-0 place-items-center text-green-strong [&_svg]:size-3.5">
+                        <CheckCircle />
+                      </span>
+                      {message.changes.length} change{message.changes.length === 1 ? "" : "s"}
+                    </div>
+                    {/* This list sits inside the same `chat-markdown`
+                        ancestor the plain-answer branch uses for real
+                        Markdown output, so `.chat-markdown ul`'s own rule
+                        (`padding-left: 18px`, meant for react-markdown's
+                        bullet lists) was winning over this list's own
+                        `px-[11px]` — a `ul` + class selector always beats a
+                        same-layer class-only one regardless of which comes
+                        later, so only `!` (important) actually overrides it.
+                        `list-none` removes the browser's own default marker
+                        too (this list draws its own dot span instead). */}
+                    <ul className="list-none space-y-1 py-[9px] pl-[11px]! pr-[11px]!">
+                      {message.changes.map((change, index) => (
+                        <li
+                          key={index}
+                          className="chat-in flex items-start gap-1.5 text-[11.5px] leading-[1.45]"
+                          style={{ animationDelay: `${index * 130}ms` }}
+                        >
+                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-slate-soft" />
+                          <span>{change}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    {message.warnings?.length ? (
+                      <div className="border-t border-[#f0e0b8] bg-amber-soft px-[11px] py-[9px]">
+                        <div className="mb-1 flex items-center gap-1.5 text-[11px] font-[650] text-amber">
+                          <span className="grid size-3.5 shrink-0 place-items-center [&_svg]:size-3">
+                            <Alert />
+                          </span>
+                          Couldn&apos;t do all of it
+                        </div>
+                        <ul className="space-y-1">
+                          {message.warnings.map((warning, index) => (
+                            <li
+                              key={index}
+                              className="chat-in flex items-start gap-1.5 text-[11.5px] leading-[1.45] text-amber"
+                              style={{
+                                animationDelay: `${(message.changes?.length ?? 0) * 130 + index * 130}ms`,
+                              }}
+                            >
+                              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber" />
+                              <span>{warning}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : message.role === "ai" ? (
+                <Markdown>{message.text}</Markdown>
+              ) : (
+                message.text
+              )}
             </div>
           </div>
         ))}
 
-        {(busy === "improving" || busy === "analyzing") && (
+        {/* Once the diagram itself has landed and the canvas starts
+            sketching it in, this hands off to the "drawing X" bubble below —
+            not shown together, so there's one live status at a time. */}
+        {(busy === "improving" ||
+          busy === "analyzing" ||
+          (busy === "generating" && !generationProgress)) && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
+            <div className="chat-live min-w-0 max-w-full text-[11.5px] leading-[1.5] text-ink">
               {busy === "analyzing" && (
                 <div className="mb-1.5 text-[11px] font-[550] text-slate">
                   Looking at your image…
+                </div>
+              )}
+              {busy === "generating" && (
+                <div className="mb-1.5 text-[11px] font-[550] text-slate">
+                  Working out the steps…
                 </div>
               )}
               <span className="typing">
@@ -301,12 +455,34 @@ export function Copilot() {
           </div>
         )}
 
+        {/* The full node list, known the instant generation/layout returns —
+            checked off in step with the canvas's own sketch animation
+            (Canvas.tsx / RehearsalOverlay) rather than a single "drawing X"
+            line, so this is a real todo list, not a fake one revealed early. */}
+        {generationPlan && (
+          <div className="flex max-w-full gap-2">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
+              <LogoMark />
+            </span>
+            <div className="chat-live min-w-0 max-w-full text-[11.5px] leading-[1.5] text-ink">
+              <div className="mb-1.5 text-[11px] font-[550] text-slate">Drawing your diagram…</div>
+              <AiTodoList
+                steps={generationPlan.map((label, index) => ({
+                  id: String(index),
+                  label,
+                  done: index < (generationProgress?.index ?? 0),
+                }))}
+              />
+            </div>
+          </div>
+        )}
+
         {improved && (
           <div className="flex max-w-full gap-2">
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
+            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[11.5px] leading-[1.5] text-ink">
               {improved.reasoning ?? "Here's how I'd structure that."}
 
               <div className="mt-2 overflow-hidden rounded-[10px] border border-line bg-surface">
@@ -392,13 +568,21 @@ export function Copilot() {
             <span className="grid size-7 shrink-0 place-items-center rounded-full border border-green-line bg-green-soft text-green-strong [&_svg]:size-[15px]">
               <LogoMark />
             </span>
-            <div className="min-w-0 max-w-full whitespace-pre-wrap py-[5px] text-[12.5px] leading-[1.5] text-ink">
-              {/* Two real phases, not a fake timer — sendChatMessage genuinely
-                  makes two sequential requests (classify, then apply), so
-                  this tracks which one is actually in flight. */}
+            <div className="chat-live min-w-0 max-w-full text-[11.5px] leading-[1.5] text-ink">
+              {/* A live todo list, not a fake timer — every step shown here
+                  was genuinely announced by the backend the moment it became
+                  knowable (spinner) and flipped to done with the real text
+                  the moment it actually finished. */}
               <div className="mb-1.5 text-[11px] font-[550] text-slate">
-                {editPhase === "checking" ? "Reading your diagram…" : "Applying the change…"}
+                {editPhase === "checking"
+                  ? "Understanding your request…"
+                  : "Making changes to the diagram…"}
               </div>
+              {editSteps.length > 0 && (
+                <div className="mb-1.5">
+                  <AiTodoList steps={editSteps} />
+                </div>
+              )}
               <span className="typing">
                 <i />
                 <i />
@@ -412,6 +596,26 @@ export function Copilot() {
       </div>
 
       <div className="shrink-0 border-t border-line bg-surface px-3 pb-3 pt-3">
+        {sessionInfo && (
+          <div className="mb-2 flex items-start justify-between gap-2 rounded-[10px] border border-line bg-paper px-3 py-2 text-[11.5px] leading-[1.5] text-slate">
+            <span>
+              <b className="text-ink">This session</b> · {messages.length} message
+              {messages.length === 1 ? "" : "s"}
+              {messages[0] && <> · started {timeAgo(messages[0].created_at)}</>}
+              {messages.length > 0 && (
+                <> · last activity {timeAgo(messages[messages.length - 1].created_at)}</>
+              )}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="grid size-5 shrink-0 place-items-center rounded text-slate-soft transition-colors hover:text-ink [&_svg]:size-3"
+              onClick={() => setSessionInfo(false)}
+            >
+              <X />
+            </button>
+          </div>
+        )}
         <div
           className={`relative rounded-[16px] bg-paper p-2.5 transition-[box-shadow,background-color] hover:ring-1 hover:ring-line-strong focus-within:bg-surface ${dragOver ? "ring-2 ring-green-ring" : ""}`}
           data-composer-field
@@ -430,6 +634,14 @@ export function Copilot() {
             onFilePicked(event.dataTransfer.files?.[0]);
           }}
         >
+          {slashMatches.length > 0 && (
+            <SlashCommandMenu
+              matches={slashMatches}
+              highlightedIndex={slashHighlight}
+              onHover={setSlashHighlight}
+              onPick={runSlashCommand}
+            />
+          )}
           {dragOver && (
             <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[16px] border-2 border-dashed border-green bg-[rgba(13,159,110,0.08)] text-[12.5px] font-[600] text-green-deep">
               Drop image to attach
@@ -448,17 +660,20 @@ export function Copilot() {
           </div>
 
           {!hasNodes && attachedImage && (
-            <div className="mb-1.5 flex items-center gap-2 rounded-[10px] border border-line bg-surface p-1.5 pr-2">
+            <div className="relative mb-1.5 inline-block">
+              {/* A standalone square card, not a row — `object-contain` so a
+                  wide sketch or tall screenshot stays whole rather than
+                  cropped, the filename as a hover title instead of a visible
+                  label, and the remove button as a small corner badge over
+                  the thumbnail itself. */}
               <img
                 src={attachedImage.dataUrl}
-                alt=""
-                className="size-9 shrink-0 rounded-[7px] border border-line object-cover"
+                alt={attachedImage.name}
+                title={attachedImage.name}
+                className="size-28 rounded-xl border border-line bg-paper object-contain"
               />
-              <span className="min-w-0 flex-1 truncate text-[11px] font-[550] text-ink">
-                {attachedImage.name}
-              </span>
               <button
-                className="grid size-5 shrink-0 place-items-center rounded-full border-none bg-transparent text-slate-soft transition-colors hover:bg-paper hover:text-ink [&_svg]:size-3"
+                className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-line bg-surface text-slate-soft shadow-1 transition-colors hover:bg-paper hover:text-ink [&_svg]:size-3"
                 aria-label="Remove attached image"
                 onClick={() => setAttachedImage(null)}
               >
@@ -492,30 +707,47 @@ export function Copilot() {
             }
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
+              if (slashMatches.length > 0) {
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setSlashHighlight((i) => (i + 1) % slashMatches.length);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setSlashHighlight((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setInput("");
+                  return;
+                }
+              }
               if (event.key !== "Enter" || event.shiftKey) return; // Shift+Enter -> newline
               event.preventDefault();
               send();
             }}
+            onPaste={(event) => {
+              // Same gate as the drag-drop handler above — attaching a
+              // picture is only ever part of describing a diagram from
+              // scratch, not something a message about an existing one uses.
+              if (hasNodes) return;
+              const item = Array.from(event.clipboardData.items).find((i) =>
+                i.type.startsWith("image/"),
+              );
+              if (!item) return; // plain text paste — let the browser handle it
+              const file = item.getAsFile();
+              if (!file) return;
+              event.preventDefault(); // don't also drop a stray filename/blob URL into the text
+              onFilePicked(file);
+            }}
           />
-          <div className="flex items-center gap-2 pt-2">
-            <span className="min-w-0 flex-1 truncate text-[10.5px] text-slate-soft">
-              {hasNodes
-                ? "Edits, rearranges, explains — say “these” for what's selected"
-                : "Improves the prompt, then generates a diagram"}
-              {" · "}
-              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
-                Enter
-              </kbd>
-              {" to send · "}
-              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
-                Shift
-              </kbd>
-              {" + "}
-              <kbd className="rounded-[5px] border border-line bg-surface px-1 py-px font-[600] text-slate">
-                Enter
-              </kbd>
-              {" for a new line"}
-            </span>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            {/* The old row also carried a "what this does / Enter to send"
+                hint here — cut as clutter that repeats what's already
+                obvious from using the box once. Actions stay right-aligned
+                the way they were alongside it. */}
             {!hasNodes && (
               <>
                 <input
@@ -529,7 +761,7 @@ export function Copilot() {
                   }}
                 />
                 <button
-                  className="grid size-[30px] shrink-0 place-items-center rounded-[10px] border-none bg-transparent text-slate transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px]"
+                  className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px] [&_svg]:stroke-[1.6]"
                   aria-label="Attach an image of a diagram sketch"
                   title="Attach an image — the AI reads it instead of typed text"
                   disabled={busy !== null}
@@ -540,7 +772,7 @@ export function Copilot() {
               </>
             )}
             <button
-              className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px]"
+              className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px] [&_svg]:stroke-[1.6]"
               aria-label="Send"
               disabled={(!input.trim() && !attachedImage) || busy !== null}
               onClick={send}

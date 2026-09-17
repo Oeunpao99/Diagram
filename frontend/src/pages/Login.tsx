@@ -1,6 +1,8 @@
 import { type FormEvent, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
+import { PasswordField } from "../components/PasswordField";
+import { SocialAuthButtons } from "../components/SocialAuthButtons";
 import { useAuth } from "../store/useAuth";
 import { AuthLayout } from "./AuthLayout";
 
@@ -50,20 +52,14 @@ export default function Login() {
           />
         </label>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-slate">Password</span>
-          <input
-            className="w-full rounded-md border border-line-strong bg-surface px-3 py-[9px] text-sm text-ink transition-[border-color,box-shadow] outline-none focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)]"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              clearError();
-            }}
-          />
-        </label>
+        <PasswordField
+          autoComplete="current-password"
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            clearError();
+          }}
+        />
 
         {error && (
           <p className="m-0 rounded-md bg-red-soft px-3 py-[9px] text-[13px] text-red" role="alert">
@@ -79,6 +75,8 @@ export default function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>
+
+      <SocialAuthButtons />
     </AuthLayout>
   );
 }

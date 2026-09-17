@@ -20,6 +20,7 @@ Two kinds of tool live here:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,7 @@ from app.schemas.diagram import (
     Edge,
     EdgeArrow,
     EdgeStyle,
+    Group,
     Lane,
     Node,
     NodeKind,
@@ -74,14 +76,14 @@ CLIENT_TOOLS = {"undo", "redo", "fit_view", "zoom_in", "zoom_out", "select"}
 TOOL_CATALOGUE = """
 Tools that change the document:
 
-  add_node     {label, kind?, after?, before?, id?, lane?, icon?, color?,
-                description?}
+  add_node     {label, kind?, after?, before?, id?, lane?, group?, icon?,
+                color?, description?}
                `after` / `before` are existing node ids — the new node is wired
                in after (or before) that one. Give at least one of them unless
                the node genuinely stands alone. Pass your own short `id` when a
                later call in the same list needs to refer to this new node.
-  update_node  {id, label?, kind?, icon?, color?, description?, lane?, locked?,
-                width?, height?}
+  update_node  {id, label?, kind?, icon?, color?, description?, lane?, group?,
+                locked?, width?, height?}
   delete_node  {id}                 also removes every connector touching it
   connect      {source, target, label?, style?, condition?, curve?, color?,
                 width?, start_arrow?, end_arrow?}
@@ -92,6 +94,14 @@ Tools that change the document:
   set_direction {direction}         LR | RL | TB | BT — also re-runs layout
   add_lane     {label, order?}
   delete_lane  {id}                 nodes in it keep their place, lose the lane
+  add_group    {label, parent?}     a nested boundary box — a VPC/VNet, subnet,
+                                    account, data centre, trust boundary. Omit
+                                    `parent` for an outermost one, or pass an
+                                    existing group id to nest inside it.
+  delete_group {id}                 anything inside rises to its parent
+  set_node_group {node_id, group_id}
+                                    put nodes in a container; group_id null
+                                    takes them out of the one they're in
   relayout     {direction?}         recompute every position from scratch
   set_page     {preset} or {width, height}
                preset: slide-16-9 | slide-4-3 | a4-portrait | a4-landscape | square
@@ -109,7 +119,8 @@ Tools that act on the canvas, not the document:
 
 Field values:
   kind        start | end | process | decision | document | data | database |
-              actor | system | service | queue | cloud | note
+              actor | system | service | queue | cloud | note | wedge | hub | circle | hexagon | octagon | triangle | pentagon | star | tag | arrow
+              (wedge/hub are for radial diagrams only — see the radial guide)
   style       solid | dashed | dotted | dashdot | longdash | animated
   curve       smoothstep | step | straight | bezier
   start_arrow / end_arrow
@@ -228,6 +239,7 @@ def apply_tools(
     doc: DiagramDoc,
     calls: list[AgentAction],
     selection: list[str] | None = None,
+    on_step: Callable[[str, str], None] | None = None,
 ) -> ToolOutcome:
     """Run `calls` against `doc` in order, mutating it in place.
 
@@ -235,6 +247,12 @@ def apply_tools(
     there — is recorded as a warning and skipped, rather than aborting the
     rest. A partially applied instruction the user can see is better than a
     silent no-op, and every change is one undo away on the client.
+
+    `on_step` (optional) is called after each document-mutating call with
+    `(tool, summary)` — the real text that landed in the changelog (or
+    warning) for that one call, which is what a live-progress feed should
+    show as it completes. Client-only tools (undo, select, ...) skip it —
+    they apply instantly on the client and have nothing to report here.
     """
     selection = selection or []
     out = ToolOutcome()
@@ -256,6 +274,8 @@ def apply_tools(
     for call in calls:
         tool = (call.tool or "").strip().lower()
         args = call.args if isinstance(call.args, dict) else {}
+        done_changes = len(out.changes)
+        done_warnings = len(out.warnings)
 
         if tool in CLIENT_TOOLS:
             if tool == "select":
@@ -271,8 +291,12 @@ def apply_tools(
         handler = _HANDLERS.get(tool)
         if handler is None:
             out.warnings.append(f"Don't know how to '{tool}'.")
-            continue
-        handler(ctx, args)
+        else:
+            handler(ctx, args)
+
+        if on_step is not None:
+            detail = out.changes[done_changes:] + out.warnings[done_warnings:]
+            on_step(tool, "; ".join(detail) or f"Ran '{tool}'.")
 
     doc.nodes = [n for n in doc.nodes if n.id in ctx.node_ids]
     doc.edges = [e for e in doc.edges if e.id in ctx.edge_ids]
@@ -339,6 +363,9 @@ def _t_add_node(ctx: _Ctx, args: dict[str, Any]) -> None:
     lane = _text(args.get("lane"))
     if lane and any(current.id == lane for current in ctx.doc.lanes):
         node.lane = lane
+    group = _text(args.get("group"))
+    if group and any(current.id == group for current in ctx.doc.groups):
+        node.group = group
     if icon := _text(args.get("icon"), 60):
         node.icon = icon
     if color := _color(args.get("color")):
@@ -391,6 +418,9 @@ def _t_update_node(ctx: _Ctx, args: dict[str, Any]) -> None:
         if (lane := _text(args.get("lane"))) and any(c.id == lane for c in ctx.doc.lanes):
             edits.append("moved lane")
             node.lane = lane
+        if (group := _text(args.get("group"))) and any(c.id == group for c in ctx.doc.groups):
+            edits.append("moved container")
+            node.group = group
         if isinstance(args.get("locked"), bool):
             node.locked = args["locked"]
             edits.append("locked" if node.locked else "unlocked")
@@ -566,6 +596,64 @@ def _t_delete_lane(ctx: _Ctx, args: dict[str, Any]) -> None:
     ctx.out.changes.append(f"Removed the '{lane.label}' lane.")
 
 
+def _t_add_group(ctx: _Ctx, args: dict[str, Any]) -> None:
+    label = _text(args.get("label"), 80)
+    if not label:
+        ctx.out.warnings.append("Skipped a container with no name.")
+        return
+    parent = _text(args.get("parent"), 80) or None
+    if parent and not any(group.id == parent for group in ctx.doc.groups):
+        ctx.out.warnings.append(f"No container called '{parent}' to nest '{label}' in.")
+        parent = None
+    taken = {group.id for group in ctx.doc.groups}
+    slug = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "group"
+    group_id = slug if slug not in taken else _fresh_id("group_", taken)
+    ctx.doc.groups.append(Group(id=group_id, label=label, parent=parent))
+    ctx.out.relayout = True
+    ctx.out.changes.append(
+        f"Added the '{label}' container." if not parent else f"Added '{label}' inside '{parent}'."
+    )
+
+
+def _t_delete_group(ctx: _Ctx, args: dict[str, Any]) -> None:
+    group_id = _text(args.get("id"), 80)
+    group = next((current for current in ctx.doc.groups if current.id == group_id), None)
+    if group is None:
+        ctx.out.warnings.append(f"No container called '{group_id}'.")
+        return
+    ctx.doc.groups = [current for current in ctx.doc.groups if current.id != group_id]
+    # Children rise to the deleted container's own parent rather than being
+    # orphaned — removing one boundary shouldn't silently flatten what it held.
+    for child in ctx.doc.groups:
+        if child.parent == group_id:
+            child.parent = group.parent
+    for node in ctx.doc.nodes:
+        if node.group == group_id:
+            node.group = group.parent
+    ctx.out.relayout = True
+    ctx.out.changes.append(f"Removed the '{group.label}' container.")
+
+
+def _t_set_node_group(ctx: _Ctx, args: dict[str, Any]) -> None:
+    group_id = _text(args.get("group_id"), 80) or None
+    group = next((current for current in ctx.doc.groups if current.id == group_id), None)
+    if group_id and group is None:
+        ctx.out.warnings.append(f"No container called '{group_id}'.")
+        return
+    targets = ctx.resolve_nodes(args.get("node_id"))
+    if not targets:
+        ctx.out.warnings.append(f"No step called '{args.get('node_id')}' to move.")
+        return
+    for node in targets:
+        node.group = group_id
+        ctx.out.changes.append(
+            f"Moved '{node.label}' into '{group.label}'."
+            if group
+            else f"Took '{node.label}' out of its container."
+        )
+    ctx.out.relayout = True
+
+
 def _t_relayout(ctx: _Ctx, args: dict[str, Any]) -> None:
     if args.get("direction"):
         _t_set_direction(ctx, args)
@@ -608,6 +696,9 @@ _HANDLERS: dict[str, Any] = {
     "set_direction": _t_set_direction,
     "add_lane": _t_add_lane,
     "delete_lane": _t_delete_lane,
+    "add_group": _t_add_group,
+    "delete_group": _t_delete_group,
+    "set_node_group": _t_set_node_group,
     "relayout": _t_relayout,
     "set_page": _t_set_page,
     "clear_page": _t_clear_page,

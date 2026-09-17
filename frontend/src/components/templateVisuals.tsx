@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Brain,
   CheckCircle2,
   ClipboardCheck,
   Cpu,
@@ -36,6 +37,8 @@ export const TYPE_LABEL: Record<DiagramType, string> = {
   data_flow: "Data flow",
   org_chart: "Org chart",
   mind_map: "Mind map",
+  tree: "Tree",
+  radial: "Circle diagram",
 };
 
 /** Tint (bg, border, ink) per diagram type, matching the old rail thumb hues. */
@@ -49,6 +52,8 @@ const TYPE_HUE: Record<DiagramType, string> = {
   data_flow: "green",
   org_chart: "orange",
   mind_map: "red",
+  tree: "emerald",
+  radial: "gold",
 };
 
 const TINT: Record<string, [string, string, string]> = {
@@ -61,6 +66,8 @@ const TINT: Record<string, [string, string, string]> = {
   green: ["#e2f4ec", "#c9e9d9", "#1d9a6c"],
   orange: ["#faece3", "#f2d7c7", "#c1763a"],
   red: ["#fae8e6", "#f2d2cf", "#c6574f"],
+  emerald: ["#e5f3ec", "#cfe8db", "#1f9d6e"],
+  gold: ["#fdf3d9", "#f6e3ac", "#a67c1b"],
 };
 
 export function tintFor(type: DiagramType) {
@@ -164,6 +171,16 @@ export function TypeGlyph({ type }: { type: DiagramType }) {
           <path d="M12 7.8v2.2M12 10H7.3M12 10h4.7M7.3 10v6.2M16.7 10v6.2" />
         </svg>
       );
+    case "tree":
+      // A dendrogram: a root dot with a trunk that forks into two leaves.
+      return (
+        <svg {...s}>
+          <circle cx="3.8" cy="12" r="1.6" fill="currentColor" stroke="none" />
+          <path d="M3.8 12V7.4M3.8 12v4.6M3.8 7.4h7.4M3.8 16.6h7.4" />
+          <rect x="11.2" y="5" width="8.6" height="4.8" rx="1.5" />
+          <rect x="11.2" y="14.2" width="8.6" height="4.8" rx="1.5" />
+        </svg>
+      );
     case "mind_map":
       return (
         <svg {...s}>
@@ -181,6 +198,15 @@ export function TypeGlyph({ type }: { type: DiagramType }) {
           <path d="M5.5 8v7c0 2.2 2.9 4 6.5 4s6.5-1.8 6.5-4V8" />
           <path d="M5.5 11.5c0 2.2 2.9 4 6.5 4s6.5-1.8 6.5-4" opacity="0.4" />
           <path d="M12 21v-1.8M9.5 20l2.5 1.6 2.5-1.6" />
+        </svg>
+      );
+    case "radial":
+      // A wheel of equal slices around a hub — the ring plus its spokes.
+      return (
+        <svg {...s}>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="3.2" opacity="0.5" />
+          <path d="M12 4v3.2M20 12h-3.2M12 20v-3.2M4 12h3.2" />
         </svg>
       );
     default:
@@ -208,11 +234,14 @@ const TEMPLATE_ICONS: Record<string, LucideIcon> = {
   "data-flow-analytics": BarChart3,
   "er-ecommerce": ShoppingCart,
   "etl-pipeline": Workflow,
+  "dendrogram": GitBranch,
   "ml-pipeline": Cpu,
   "agile-sprint-workflow": Workflow,
   "project-team-swimlane": Users,
   "organization-chart": Users,
+  "family-tree": Users,
   "project-delivery-flow": Route,
+  "project-mind-map": Brain,
   "uat-process": CheckCircle2,
   "export-process": Ship,
   "import-cargo-clearance": PackageCheck,

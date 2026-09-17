@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "../api/client";
-import type { Accent, Theme, User } from "../api/types";
+import type { Accent, TelegramAuthPayload, Theme, TokenResponse, User } from "../api/types";
 import { applyTheme, storedAccent, storedTheme } from "../theme";
 
 interface AuthState {
@@ -16,6 +16,9 @@ interface AuthState {
 
   boot: () => Promise<void>;
   login: (email: string, password: string) => Promise<boolean>;
+  loginGoogle: (code: string, redirectUri: string) => Promise<boolean>;
+  loginGithub: (code: string, redirectUri: string) => Promise<boolean>;
+  loginTelegram: (payload: TelegramAuthPayload) => Promise<boolean>;
   register: (email: string, name: string, password: string) => Promise<boolean>;
   logout: () => void;
   setAppearance: (patch: { theme?: Theme; accent?: Accent }) => Promise<void>;
@@ -27,6 +30,17 @@ interface AuthState {
 function message(err: unknown, fallback: string) {
   if (err instanceof ApiError) return err.message || fallback;
   return err instanceof Error ? err.message : fallback;
+}
+
+/** The common tail of every sign-in path (password or provider): stash the
+ *  token, adopt the account's saved theme, and land the user in state. */
+function settleSession(
+  set: (patch: Partial<AuthState>) => void,
+  { access_token, user }: TokenResponse,
+) {
+  setToken(access_token);
+  applyTheme(user.theme, user.accent);
+  set({ user, theme: user.theme, accent: user.accent, busy: false });
 }
 
 export const useAuth = create<AuthState>((set, get) => ({
@@ -59,13 +73,43 @@ export const useAuth = create<AuthState>((set, get) => ({
   async login(email, password) {
     set({ busy: true, error: null });
     try {
-      const { access_token, user } = await api.login(email, password);
-      setToken(access_token);
-      applyTheme(user.theme, user.accent);
-      set({ user, theme: user.theme, accent: user.accent, busy: false });
+      settleSession(set, await api.login(email, password));
       return true;
     } catch (err) {
       set({ error: message(err, "Could not sign in."), busy: false });
+      return false;
+    }
+  },
+
+  async loginGoogle(code, redirectUri) {
+    set({ busy: true, error: null });
+    try {
+      settleSession(set, await api.loginGoogle(code, redirectUri));
+      return true;
+    } catch (err) {
+      set({ error: message(err, "Could not sign in with Google."), busy: false });
+      return false;
+    }
+  },
+
+  async loginGithub(code, redirectUri) {
+    set({ busy: true, error: null });
+    try {
+      settleSession(set, await api.loginGithub(code, redirectUri));
+      return true;
+    } catch (err) {
+      set({ error: message(err, "Could not sign in with GitHub."), busy: false });
+      return false;
+    }
+  },
+
+  async loginTelegram(payload) {
+    set({ busy: true, error: null });
+    try {
+      settleSession(set, await api.loginTelegram(payload));
+      return true;
+    } catch (err) {
+      set({ error: message(err, "Could not sign in with Telegram."), busy: false });
       return false;
     }
   },

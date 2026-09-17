@@ -26,12 +26,18 @@ export function useCanvasAssets() {
     });
   };
 
-  const addShape = (kind: NodeKind, label: string, position?: { x: number; y: number }) => {
+  const addShape = (
+    kind: NodeKind,
+    label: string,
+    position?: { x: number; y: number },
+    size?: { width: number; height: number },
+  ) => {
     addNode({
       id: `${kind}_${Date.now().toString(36)}`,
       label,
       kind,
       position: position ?? centerPoint(),
+      ...(size ? { size } : {}),
     });
   };
 

@@ -30,9 +30,32 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class OAuthCodeRequest(BaseModel):
+    """Google/GitHub: the redirect callback's `code`, exchanged server-side
+    for the user's profile. `redirect_uri` must match the one the browser was
+    actually sent to — both providers check it against the code themselves,
+    so a mismatch fails the exchange rather than silently ignoring it."""
+
+    code: str
+    redirect_uri: str
+
+
+class TelegramAuthRequest(BaseModel):
+    """The Login Widget's callback payload, forwarded as-is — every field
+    here (plus `hash`) is part of what gets HMAC-verified server-side."""
+
+    id: int
+    first_name: str
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+    auth_date: int
+    hash: str
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
-    email: EmailStr
+    email: EmailStr | None
     name: str
     theme: Theme
     accent: Accent

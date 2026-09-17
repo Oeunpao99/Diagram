@@ -295,6 +295,47 @@
   }
 }
 
+/* Each live-feed / summary line slides in after the previous one (delay set
+   per line in the component), so a finished edit reads as a checklist being
+   ticked off one line at a time instead of a wall that lands all at once. */
+@keyframes chat-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chat-in {
+  opacity: 0;
+  animation: chat-in 0.22s ease forwards;
+}
+
+/* A reply that actually arrived in one response still *reveals* left to
+   right, the same "still streaming in" feel a live token-by-token answer
+   has — clip-path sweeps open at the block's own edges, so it reveals every
+   line of a wrapped paragraph in lockstep rather than needing to know where
+   each line breaks. Plain percentage keyframes on clip-path interpolate
+   natively in every current browser — no gradient-stop animation, so no
+   `@property` registration needed to make it smooth. */
+@keyframes chat-stream {
+  from {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0.4;
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+  }
+}
+
+.chat-stream {
+  animation: chat-stream 640ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
 @keyframes sel-pop {
   from {
     opacity: 0;
@@ -477,6 +518,114 @@
   animation-delay: 0.3s;
 }
 
+/* A live, still-running status — the busy indicator, the shape-by-shape
+   drawing line, the edit step list. Dashed border and a faint tint (not the
+   solid card the *finished* changelog gets below) so "still working" and
+   "done" are two visually distinct states at a glance, not the same plain
+   text with a typing indicator tacked on. The tint fades in rather than
+   snapping in, so it doesn't flash when a fast edit barely shows it at all. */
+.chat-live {
+  animation: chat-in 0.18s ease forwards;
+  border-radius: 10px;
+  border: 1.5px dashed var(--line-strong);
+  background: color-mix(in srgb, var(--green-soft) 45%, transparent);
+  padding: 9px 11px;
+}
+
+/* ------------------------------------------------------------ chat markdown */
+
+/* The AI's chat replies render through react-markdown (Copilot.tsx) — real
+   block elements (p, ul, code, …) now, not one pre-wrapped string. Browser
+   defaults for those are sized for a full document, not an 11-13px chat
+   bubble, so every block here gets the same compact rhythm the plain-text
+   bubbles already had: no dangling top/bottom margin, tight paragraph and
+   list spacing, no oversized headings. */
+.chat-markdown > :first-child {
+  margin-top: 0;
+}
+.chat-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-markdown p {
+  margin: 0 0 8px;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.chat-markdown li {
+  margin: 2px 0;
+}
+
+.chat-markdown li > p {
+  margin: 0;
+}
+
+.chat-markdown li > ul,
+.chat-markdown li > ol {
+  margin-top: 2px;
+}
+
+.chat-markdown strong {
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+
+.chat-markdown a {
+  color: var(--green-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-markdown code {
+  border-radius: 4px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+.chat-markdown pre {
+  margin: 0 0 8px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 9px 11px;
+}
+
+.chat-markdown pre code {
+  border-radius: 0;
+  background: none;
+  padding: 0;
+}
+
+.chat-markdown blockquote {
+  margin: 0 0 8px;
+  border-left: 2.5px solid var(--line-strong);
+  padding-left: 10px;
+  color: var(--slate);
+}
+
+.chat-markdown hr {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4 {
+  margin: 10px 0 4px;
+  font-size: 1em;
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+
 /* ------------------------------------------------------------- color input */
 
 .color-custom__input {
@@ -637,7 +786,7 @@
    transforms don't compose across separate rules — the lift would just
    replace it and snap the shape back to a plain rectangle. They still get
    the same shadow feedback. */
-.node:hover:not(.is-selected):not(.node--diamond):not(.node--para) {
+.node:hover:not(.is-selected):not(.node--diamond):not(.node--para):not(.node--wedge) {
   box-shadow:
     0 2px 4px rgba(15, 23, 42, 0.08),
     0 8px 20px rgba(15, 23, 42, 0.13);
@@ -663,13 +812,21 @@
    box-shadow ring from .is-selected above still shows on every shape,
    diamonds included, since clip-path draws it right at the shape's own
    edge instead of offset beyond it. */
-.node.is-selected:not(.node--diamond)::after {
+.node.is-selected:not(.node--diamond):not(.node--wedge):not(.node--hexagon):not(.node--octagon):not(.node--triangle):not(.node--pentagon):not(.node--star):not(.node--tag):not(.node--arrow)::after {
   content: "";
   position: absolute;
   inset: -5px;
   border: 1.5px solid var(--green);
   border-radius: calc(var(--radius) + 5px);
   pointer-events: none;
+}
+
+/* The cylinder's own cap pokes 11px above the box (see .node--cylinder::before)
+   — well past this ring's usual 5px halo — so left at the default it would
+   cut across the middle of the cap instead of enclosing it. */
+.node--cylinder.is-selected::after {
+  top: -14px;
+  border-radius: 20px;
 }
 
 .node__label {
@@ -747,26 +904,54 @@
   font-size: 12px;
 }
 
+/* A real cylinder, not a rounded rectangle standing in for one: uniform
+   border-radius on all four corners (the old approach) never reads as a
+   database icon, because nothing about it says "flat elliptical top you're
+   looking down into" — it's just a softened box. The actual cap is drawn by
+   ::before below; this element's own top stays square so the ellipse is
+   the only thing defining that edge, and only the base gets rounded, the
+   way a cylinder's bottom does. */
 .node--cylinder {
-  border-radius: 10px / 18px;
+  border-radius: 0 0 14px 14px;
   background: #f1f6f4;
 }
 
-/* Subtle gloss across the top of the cylinder so the rim reads as rounded
-   instead of a flat slab. Translucent, so it sits on top of any tint. */
+/* The cap: a full-width ellipse straddling the top edge, half poking above
+   the box and half overlapping into it. `border`/`background: inherit` copy
+   the box's own computed values (default fill, kind-tint, or a full-strength
+   NODE_COLORS custom colour) so the cap is never a colour the body isn't —
+   the same reasoning as the component shape's tabs above. The overlapping
+   half is therefore invisible against the body it sits on; only the poking-
+   above half reads as a cap, tapering to flush with the box at its left and
+   right edges the way an ellipse naturally does. */
 .node--cylinder::before {
   content: "";
   position: absolute;
-  top: 6px;
-  left: 13%;
-  right: 13%;
-  height: 26%;
-  border-radius: 50% / 100%;
-  background: linear-gradient(
-    180deg,
-    rgba(16, 24, 26, 0.05),
-    rgba(255, 255, 255, 0.65)
-  );
+  left: -1.5px;
+  right: -1.5px;
+  top: -11px;
+  height: 22px;
+  border-radius: 50%;
+  border: inherit;
+  background: inherit;
+  pointer-events: none;
+}
+
+/* A soft highlight across the cap itself, so it reads as curved rather than
+   a flat disc — `soft-light` so it adapts to whatever colour the cap
+   actually is instead of sitting on top as a flat white shape (see the
+   node--kind colour comment elsewhere for why a plain overlay breaks on a
+   full-strength custom colour). */
+.node--cylinder::after {
+  content: "";
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: -9px;
+  height: 7px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.15));
+  mix-blend-mode: soft-light;
   pointer-events: none;
 }
 
@@ -798,8 +983,11 @@
   transform: skewX(12deg);
 }
 
+/* A soft, lopsided rounding on the top corners only — the cheap version of a
+   cloud silhouette a couple of overlapping circles would draw, without the
+   extra pseudo-elements. */
 .node--cloud {
-  border-radius: 24px;
+  border-radius: 42% 42% 14px 14px / 60% 60% 14px 14px;
   background: #f1f6f4;
 }
 
@@ -807,10 +995,264 @@
   border-radius: 46% 46% var(--radius) var(--radius);
 }
 
+/* The standard UML shorthand for "a system/service": two small tabs
+   straddling the left edge of an otherwise plain box. `system` and `service`
+   used to render as the exact same plain rectangle as a flowchart `process`
+   step — nothing told an architecture diagram's boxes apart from a
+   process-flow's. `border`/`background: inherit` copies whatever the node's
+   own colour ends up being (default, kind-tint, or a custom NODE_COLORS
+   fill) so the tabs never look pasted on from a different theme. */
+.node--component {
+  border-radius: 8px;
+}
+
+.node--component::before,
+.node--component::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  width: 11px;
+  height: 8px;
+  border: inherit;
+  background: inherit;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.node--component::before {
+  top: 21%;
+}
+
+.node--component::after {
+  bottom: 21%;
+}
+
+/* A full pill like start/end, but with two faint internal dividers — a line
+   of queued items rather than a single smooth capsule. */
+.node--queue::before,
+.node--queue::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  width: 1.5px;
+  background: currentColor;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.node--queue::before {
+  left: 34%;
+}
+
+.node--queue::after {
+  left: 64%;
+}
+
 .node--note {
   border-style: dashed;
   background: #fbfaf2;
   font-size: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Free-form palette shapes (circle, hexagon, octagon, triangle). Same
+   box-content as a `process` node — icon + label, any colour — only the
+   outline changes. Clip-path shapes can't host the offset selection halo
+   (clip-path clips pseudo-elements, so the inset:-5px ring outside the box
+   never paints — same reason as the diamond above); they rely on the flat
+   box-shadow ring from .is-selected, which clip-path draws right at the
+   polygon's own edge. */
+.node--circle {
+  border-radius: 50%;
+}
+
+.node--hexagon {
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.node--octagon {
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%);
+}
+
+.node--triangle {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.node--pentagon {
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.node--star {
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+
+.node--tag {
+  clip-path: polygon(0 0, 84% 0, 100% 50%, 84% 100%, 0 100%);
+}
+
+.node--arrow {
+  clip-path: polygon(0 0, 76% 0, 100% 50%, 76% 100%, 0 100%);
+}
+
+/* Pointy clip-path shapes squeeze an icon against the narrowing walls —
+   exactly the diamond/pill situation, so they're label-only too. */
+.node--triangle .node__icon,
+.node--pentagon .node__icon,
+.node--star .node__icon,
+.node--tag .node__icon,
+.node--arrow .node__icon {
+  display: none;
+}
+
+/* Text should sit inside the widest band of each polygon, or clip-path
+   swallows the edges mid-row. */
+.node--triangle .node__label,
+.node--pentagon .node__label {
+  max-width: 56%;
+}
+
+.node--star .node__label {
+  max-width: 46%;
+}
+
+.node--tag .node__label,
+.node--arrow .node__label {
+  max-width: 72%;
+}
+
+/* The centre of a radial ("circle diagram") — a real card, just round. */
+.node--hub {
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 50%;
+  text-align: center;
+  gap: 3px;
+  padding: 18px;
+}
+
+.node--hub .node__label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* A radial wedge is an arc, not a box — the box is just the tight bounds of
+   that arc plus its icon badge and outward label, so every bit of the
+   default card chrome (fill, border, shadow, hover-lift) is switched off in
+   favour of what the SVG below actually draws. */
+.node--wedge {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  cursor: default;
+  overflow: visible;
+}
+
+.node--wedge .node__wedge-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.node--wedge .node__wedge-svg path {
+  cursor: pointer;
+  pointer-events: auto;
+  transition: filter 130ms ease;
+}
+
+.node--wedge:hover .node__wedge-svg path,
+.node--wedge.is-selected .node__wedge-svg path {
+  filter: brightness(1.08);
+}
+
+.node__wedge-badge {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+}
+
+/* Both auto (not the svg wrapper's "none") — the label is where anyone
+   naturally double-clicks to rename a wedge, and each is a real DOM child of
+   `.node--wedge` so a click here still bubbles up to its double-click
+   handler regardless of whether the point falls inside that div's own
+   nominal width/height (a label routinely sits right at, or just past, that
+   box's edge). */
+.node__wedge-label {
+  position: absolute;
+  width: max-content;
+  max-width: 190px;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.node__wedge-label--right {
+  text-align: left;
+}
+
+.node__wedge-label--left {
+  text-align: right;
+}
+
+.node__wedge-label-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.node__wedge-label-desc {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--slate);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.node__wedge-label-input {
+  position: absolute;
+  transform: translateY(-50%);
+  width: 190px;
+  font-size: 12.5px;
+  font-weight: 650;
+  border: none;
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 1px 3px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1.5px var(--line-strong);
+}
+
+/* Sits in normal flow under the (static, non-editing) title above it — see
+   node__wedge-label's own positioning — so unlike the label input this one
+   needs no absolute placement of its own. */
+.node__wedge-desc-input {
+  display: block;
+  width: 100%;
+  max-width: 190px;
+  margin-top: 2px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 2px 4px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1.5px var(--line-strong);
 }
 
 .node--text-only {
@@ -996,6 +1438,84 @@
   border-left-color: var(--green);
   border-left-width: 2px;
   background: rgba(231, 246, 240, 0.4);
+}
+
+/* ------------------------------------------------ nested container boxes */
+
+/* The body never takes pointer events: a container can span most of the
+   canvas, and it sits under the nodes it holds, so anything else would make
+   its contents unclickable. The header strip opts back in. */
+.group-box {
+  position: relative;
+  border: 1px solid var(--group-line, #b9c6d6);
+  border-radius: 10px;
+  background: var(--group-fill, rgba(99, 132, 173, 0.05));
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* Each level in gets a touch darker, so depth reads without counting borders. */
+.group-box[data-depth="0"] {
+  --group-line: #9fb2c8;
+  --group-fill: rgba(99, 132, 173, 0.04);
+}
+.group-box[data-depth="1"] {
+  --group-line: #a8bcd2;
+  --group-fill: rgba(99, 132, 173, 0.07);
+}
+.group-box[data-depth="2"] {
+  --group-line: #b2c4d8;
+  --group-fill: rgba(99, 132, 173, 0.1);
+}
+.group-box[data-depth="3"] {
+  --group-line: #bccbdd;
+  --group-fill: rgba(99, 132, 173, 0.13);
+}
+.group-box[data-depth="4"] {
+  --group-line: #c6d2e2;
+  --group-fill: rgba(99, 132, 173, 0.16);
+}
+
+.group-box.is-selected {
+  --group-line: var(--accent, #6d5ae0);
+  outline: 1px solid var(--group-line);
+  outline-offset: 1px;
+}
+
+.group-box__header {
+  display: inline-block;
+  pointer-events: auto;
+  cursor: grab;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #56708c;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.group-box__input {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: var(--paper, #fff);
+  border: 1px solid var(--group-line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  width: 14ch;
+  outline: none;
+}
+
+:root[data-theme="dark"] .group-box {
+  --group-line: #3d4b5d;
+  --group-fill: rgba(140, 170, 205, 0.06);
+}
+
+:root[data-theme="dark"] .group-box__header {
+  color: #8ea6c0;
 }
 
 /* ----------------------------------------------------------- title block */

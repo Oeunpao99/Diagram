@@ -58,6 +58,11 @@ class Diagram(Base, UUIDMixin, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="DiagramVersion.version.desc()",
     )
+    messages: Mapped[list["DiagramMessage"]] = relationship(
+        back_populates="diagram",
+        cascade="all, delete-orphan",
+        order_by="DiagramMessage.created_at",
+    )
 
 
 class DiagramVersion(Base, UUIDMixin, TimestampMixin):
@@ -77,6 +82,29 @@ class DiagramVersion(Base, UUIDMixin, TimestampMixin):
     data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     diagram: Mapped["Diagram"] = relationship(back_populates="versions")
+
+
+class DiagramMessage(Base, UUIDMixin, TimestampMixin):
+    """One line of the Copilot chat attached to a diagram — the conversation
+    that built/edited it, so reopening the diagram restores the thread."""
+
+    __tablename__ = "diagram_messages"
+    __table_args__ = (
+        Index("ix_diagram_messages_diagram_created", "diagram_id", "created_at"),
+    )
+
+    diagram_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("diagrams.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(10), nullable=False)  # "user" | "ai"
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    # A finished edit's changelog / couldn't-do-it list — see Copilot.tsx's
+    # own Msg type, which this mirrors so a restored message renders exactly
+    # like it did live (a checklist card, not plain text).
+    changes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    warnings: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+
+    diagram: Mapped["Diagram"] = relationship(back_populates="messages")
 
 
 class Template(Base, UUIDMixin, TimestampMixin):

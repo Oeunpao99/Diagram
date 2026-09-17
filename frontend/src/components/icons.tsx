@@ -82,6 +82,13 @@ export const CheckCircle = () => (
   </S>
 );
 
+/** An empty, unfilled ring — a todo-list row that hasn't started yet. */
+export const CircleOutline = () => (
+  <S>
+    <circle cx="12" cy="12" r="9" />
+  </S>
+);
+
 export const Alert = () => (
   <S>
     <path d="M12 3h.01M13 3l8 14.5a1 1 0 0 1-.9 1.5H3.9a1 1 0 0 1-.9-1.5L11 3a1 1 0 0 1 1.8-.5Z" opacity="0" />
@@ -235,6 +242,24 @@ export const TypeIcon = () => (
   </S>
 );
 
+export const AlignLeft = () => (
+  <S size={14} stroke={2}>
+    <path d="M4 6h16M4 12h10M4 18h13" />
+  </S>
+);
+
+export const AlignCenter = () => (
+  <S size={14} stroke={2}>
+    <path d="M4 6h16M7 12h10M5.5 18h13" />
+  </S>
+);
+
+export const AlignRight = () => (
+  <S size={14} stroke={2}>
+    <path d="M4 6h16M10 12h10M7 18h13" />
+  </S>
+);
+
 export const GitBranch = () => (
   <S>
     <circle cx="6" cy="6" r="2.5" />
@@ -300,6 +325,87 @@ export const BoxIcon = () => (
   <S>
     <path d="M21 8.5 12 3 3 8.5v7L12 21l9-5.5Z" />
     <path d="m3 8.5 9 5.5 9-5.5M12 14v7" />
+  </S>
+);
+
+export const DiamondIcon = () => (
+  <S>
+    <path d="M12 3l7 9-7 9-7-9 7-9Z" />
+  </S>
+);
+
+export const QueueIcon = () => (
+  <S>
+    <rect x="3" y="7" width="18" height="10" rx="5" />
+    <path d="M9 7v10M15 7v10" />
+  </S>
+);
+
+export const PillIcon = () => (
+  <S>
+    <rect x="4" y="6" width="16" height="12" rx="6" />
+  </S>
+);
+
+export const NoteIcon = () => (
+  <S>
+    <path d="M6 3h9l3 3v15H6V3Z" />
+    <path d="M15 3v3h3M9 12h6M9 16h5" />
+  </S>
+);
+
+export const DataIcon = () => (
+  <S>
+    <path d="M4 6l6-3 10 3v12l-6 3-6-3 6-3 6-3-10-3-6 3V6Z" />
+  </S>
+);
+
+export const CircleIcon = () => (
+  <S>
+    <circle cx="12" cy="12" r="8.5" />
+  </S>
+);
+
+export const HexagonIcon = () => (
+  <S>
+    <path d="M12 3.5 19.2 8v8L12 20.5 4.8 16V8L12 3.5Z" />
+  </S>
+);
+
+export const OctagonIcon = () => (
+  <S>
+    <path d="M8.3 3.5h7.4L20.5 8.3v7.4L15.7 20.5H8.3L3.5 15.7V8.3L8.3 3.5Z" />
+  </S>
+);
+
+export const TriangleIcon = () => (
+  <S>
+    <path d="M12 4.5 21 19.5H3L12 4.5Z" />
+  </S>
+);
+
+export const PentagonIcon = () => (
+  <S>
+    <path d="M12 3.5 20.5 9.5 17.2 20H6.8L3.5 9.5 12 3.5Z" />
+  </S>
+);
+
+export const StarIcon = () => (
+  <S>
+    <path d="m12 3 2.7 5.9 6.3.6-4.7 4.3 1.3 6.2L12 16.9l-5.6 3.1 1.3-6.2L3 9.5l6.3-.6Z" />
+  </S>
+);
+
+export const TagIcon = () => (
+  <S>
+    <path d="M3 4h11l6 8-6 8H3Z" />
+    <circle cx="6.5" cy="12" r="1.3" />
+  </S>
+);
+
+export const ArrowRightIcon = () => (
+  <S>
+    <path d="M3 7h11l7 5-7 5H3Z" />
   </S>
 );
 
@@ -456,6 +562,21 @@ export const Clock = () => (
   </S>
 );
 
+export const Eye = () => (
+  <S>
+    <path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </S>
+);
+
+export const EyeOff = () => (
+  <S>
+    <path d="M3 3l18 18" />
+    <path d="M10.6 5.1A9.9 9.9 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-3.2 4.1M6.2 6.8A16.8 16.8 0 0 0 2.5 12s3.5 7 9.5 7a9.2 9.2 0 0 0 3.4-.65" />
+    <path d="M9.9 10a3 3 0 0 0 4.15 4.1" />
+  </S>
+);
+
 export const Grid = () => (
   <S>
     <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.4" />
@@ -515,4 +636,37 @@ export const Ratio = ({ ratio }: { ratio?: number }) => (
       rx="1.5"
     />
   </S>
+);
+
+/* -------------------------------------------------------------------------
+   Social sign-in marks — real brand colours/silhouettes, not this file's
+   usual single-stroke style, since these need to stay recognisable as the
+   providers they are.
+   ------------------------------------------------------------------------- */
+
+export const GoogleIcon = () => (
+  <svg width={16} height={16} viewBox="0 0 18 18" aria-hidden="true">
+    <path
+      fill="#4285F4"
+      d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"
+    />
+    <path
+      fill="#34A853"
+      d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+    />
+    <path
+      fill="#EA4335"
+      d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+    />
+  </svg>
+);
+
+export const GithubIcon = () => (
+  <svg width={16} height={16} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+  </svg>
 );

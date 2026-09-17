@@ -1,6 +1,9 @@
 import type {
   Accent,
   AgentResult,
+  AgentStreamEvent,
+  ChatMessage,
+  ChatTurn,
   DiagramDoc,
   DiagramListItem,
   DiagramOut,
@@ -11,6 +14,7 @@ import type {
   ImprovedPrompt,
   Project,
   RouteResult,
+  TelegramAuthPayload,
   Template,
   Theme,
   TokenResponse,
@@ -28,6 +32,29 @@ class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+/** FastAPI's error body is `{"detail": ...}`, but `detail` isn't always a
+ *  string — a Pydantic validation failure (422) sends a *list* of
+ *  `{loc, msg, type}` objects instead. Handing that straight to `Error()`
+ *  stringifies each object as "[object Object]" rather than the actual
+ *  message, so this pulls the real text out of either shape. */
+function parseErrorDetail(text: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return text; // plain text body
+  }
+  const detail = (parsed as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => (item && typeof item === "object" && "msg" in item ? String(item.msg) : null))
+      .filter((msg): msg is string => !!msg);
+    if (messages.length > 0) return messages.join("; ");
+  }
+  return text;
 }
 
 /* --------------------------------------------------------------------------
@@ -88,13 +115,7 @@ async function post<T>(path: string, body: unknown, method = "POST"): Promise<T>
   if (!response.ok) {
     await guard(response);
     const detail = await response.text();
-    let message = detail;
-    try {
-      message = JSON.parse(detail).detail ?? detail;
-    } catch {
-      /* plain text body */
-    }
-    throw new ApiError(message || response.statusText, response.status);
+    throw new ApiError(parseErrorDetail(detail) || response.statusText, response.status);
   }
   return response.json() as Promise<T>;
 }
@@ -117,6 +138,65 @@ async function del(path: string): Promise<void> {
     await guard(response);
     throw new ApiError(response.statusText, response.status);
   }
+}
+
+/** The streaming form of `agent` — the backend pushes a `pending`/`step` event
+ *  per real tool call over Server-Sent Events, then a single `result` event
+ *  with the same AgentResult a one-shot call returns. `onEvent` fires for
+ *  every event as it arrives so the chat can narrate the run live. */
+async function streamAgent(
+  doc: DiagramDoc,
+  message: string,
+  selection: string[],
+  edgeSelection: string[],
+  diagramId: string | null | undefined,
+  history: ChatTurn[],
+  onEvent: ((event: AgentStreamEvent) => void) | undefined,
+): Promise<AgentResult> {
+  const response = await fetch(`${BASE}/ai/agent/stream`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      doc,
+      message,
+      selection,
+      edge_selection: edgeSelection,
+      diagram_id: diagramId,
+      history,
+    }),
+  });
+  if (!response.ok) {
+    await guard(response);
+    const detail = await response.text();
+    throw new ApiError(parseErrorDetail(detail) || response.statusText, response.status);
+  }
+  if (!response.body) throw new ApiError("This browser doesn't support streaming.", 0);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: AgentResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    let sep: number;
+    // Every SSE event ends in a blank line (`\n\n`), and each `data:` payload
+    // is one line of JSON — json.dumps on the server keeps it that way.
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
+      if (!dataLine) continue;
+      const event = JSON.parse(dataLine.slice(6)) as AgentStreamEvent;
+      if (event.type === "result") result = event.result;
+      onEvent?.(event);
+    }
+    if (done) break;
+  }
+
+  if (!result) throw new ApiError("The agent returned no result.", 502);
+  return result;
 }
 
 export const api = {
@@ -147,6 +227,16 @@ export const api = {
     diagramId?: string | null,
   ) => post<EditResult>("/ai/edit", { doc, instruction, selection, relayout, diagram_id: diagramId }),
 
+  // Reorganizes the diagram to follow a template's structure while keeping
+  // its own content — distinct from just loading a template's static
+  // example (which is a plain client-side doc swap, see TemplateRail.tsx).
+  restyleTemplate: (doc: DiagramDoc, templateSlug: string, diagramId?: string | null) =>
+    post<EditResult>("/ai/restyle-template", {
+      doc,
+      template_slug: templateSlug,
+      diagram_id: diagramId,
+    }),
+
   // The copilot chat's front door once a diagram exists: one call answers a
   // question, applies a precise list of tool calls, or falls through to the
   // whole-document edit agent. `selection` is what makes "make these red"
@@ -157,6 +247,7 @@ export const api = {
     selection: string[] = [],
     edgeSelection: string[] = [],
     diagramId?: string | null,
+    history: ChatTurn[] = [],
   ) =>
     post<AgentResult>("/ai/agent", {
       doc,
@@ -164,7 +255,21 @@ export const api = {
       selection,
       edge_selection: edgeSelection,
       diagram_id: diagramId,
+      history,
     }),
+
+  // Streaming twin of `agent` — same body, same result, but progress events
+  // arrive first so the chat can show the run live. Stays as the copilot's
+  // primary call; `agent` above is the fallback if streaming fails.
+  agentStream: (
+    doc: DiagramDoc,
+    message: string,
+    selection: string[] = [],
+    edgeSelection: string[] = [],
+    diagramId?: string | null,
+    history: ChatTurn[] = [],
+    onEvent?: (event: AgentStreamEvent) => void,
+  ) => streamAgent(doc, message, selection, edgeSelection, diagramId, history, onEvent),
 
   // The classify-only half of the above, kept for callers that want the
   // decision without the action.
@@ -225,6 +330,18 @@ export const api = {
 
   getDiagram: (id: string) => get<DiagramOut>(`/diagrams/${id}`),
 
+  // The Copilot thread attached to a diagram — see useDiagram.ts's
+  // `messages`. list/add mirror getDiagram/saveDiagram's shape; clear is
+  // what /new calls.
+  listMessages: (diagramId: string) => get<ChatMessage[]>(`/diagrams/${diagramId}/messages`),
+
+  addMessage: (
+    diagramId: string,
+    message: { role: "user" | "ai"; text: string; changes?: string[]; warnings?: string[] },
+  ) => post<ChatMessage>(`/diagrams/${diagramId}/messages`, message),
+
+  clearMessages: (diagramId: string) => del(`/diagrams/${diagramId}/messages`),
+
   listProjects: () => get<Project[]>("/projects"),
 
   createProject: (name: string, description?: string, color?: string) =>
@@ -241,6 +358,18 @@ export const api = {
 
   login: (email: string, password: string) =>
     post<TokenResponse>("/auth/login", { email, password }),
+
+  /* Google/GitHub: `code` is the redirect callback's query param, exchanged
+   * server-side for the user's profile — `redirect_uri` must be the exact
+   * URL the browser was actually sent to, since both providers check it
+   * against the code themselves. */
+  loginGoogle: (code: string, redirectUri: string) =>
+    post<TokenResponse>("/auth/google", { code, redirect_uri: redirectUri }),
+
+  loginGithub: (code: string, redirectUri: string) =>
+    post<TokenResponse>("/auth/github", { code, redirect_uri: redirectUri }),
+
+  loginTelegram: (payload: TelegramAuthPayload) => post<TokenResponse>("/auth/telegram", payload),
 
   me: () => get<User>("/auth/me"),
 

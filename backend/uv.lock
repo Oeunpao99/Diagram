@@ -296,6 +296,7 @@ dependencies = [
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "greenlet" },
+    { name = "httpx" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -307,7 +308,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -321,6 +321,7 @@ requires-dist = [
     { name = "email-validator", specifier = ">=2.2" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "greenlet", specifier = ">=3.1" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "openai", specifier = ">=1.99" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
@@ -332,7 +333,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.8" },

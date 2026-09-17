@@ -32,11 +32,14 @@ import type {
   NodeKind,
 } from "../api/types";
 import { takeSkipNextDocFit } from "../lib/docFit";
+import { computeGroupRects, isInside, membersOf } from "../lib/groupRects";
 import { iconToDataUrl } from "../lib/iconToDataUrl";
 import { pageRectFromMeta } from "../lib/pagePresets";
+import type { TextFormat } from "../lib/textFormat";
 import { CANVAS_ACTION_EVENT, useDiagram } from "../store/useDiagram";
 import { useSettings } from "../store/useSettings";
 import { AiSuggestion } from "./AiSuggestion";
+import { ASSET_LIBRARY } from "./assetLibrary";
 import { AssetsDock } from "./AssetsDock";
 import { CanvasToolbar, type Tool } from "./CanvasToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
@@ -51,6 +54,13 @@ import { StylePanel } from "./StylePanel";
  *  instead, with a quick cross-fade rather than a multi-second replay — see
  *  the busy-transition effect below. */
 const REHEARSE_ON_BUSY = new Set(["generating", "laying-out"]);
+
+// Pencil tool — see the "pencil tool" section below for why a stroke becomes
+// a plain image node rather than a new kind of canvas content.
+const DRAW_STROKE = "#1e293b"; // var(--ink)'s light-mode value, baked into the
+// SVG at commit time — a static raster/vector image, not something a
+// stylesheet can reach into, so this can't just be the CSS variable itself.
+const DRAW_PAD = 10; // px of breathing room around the stroke's own bounds
 
 export function Canvas() {
   const doc = useDiagram((s) => s.doc);
@@ -81,6 +91,17 @@ export function Canvas() {
     doc: DiagramDoc;
     transform: [number, number, number];
   } | null>(null);
+  // True from the instant generation/layout finishes until the rehearsal
+  // sketch is done — a separate flag from `rehearsal` itself (which only
+  // exists once the sketch is actually ready to play) because the real
+  // canvas needs to hide *before* that, not once it starts. See the
+  // busy-transition effect below. Lives in the store, not local state — the
+  // Copilot panel needs to read it too, to hold its own "done" summary
+  // until the sketch actually finishes instead of the instant busy clears.
+  const rehearsing = useDiagram((s) => s.rehearsing);
+  const setRehearsing = useDiagram((s) => s.setRehearsing);
+  const setGenerationProgress = useDiagram((s) => s.setGenerationProgress);
+  const setGenerationPlan = useDiagram((s) => s.setGenerationPlan);
 
   const syncing = useRef(false);
   const prevBusy = useRef<string | null>(null);
@@ -111,9 +132,13 @@ export function Canvas() {
   useEffect(() => {
     registerExportRuntime({
       getFlowBounds: () => {
-        const diagramNodes = getNodes().filter((n) => n.type === "diagram");
-        if (!diagramNodes.length) return null;
-        return getNodesBounds(diagramNodes);
+        // Containers count: they start above and outside their members, so
+        // measuring only the nodes would crop every boundary box in half.
+        const content = getNodes().filter(
+          (n) => n.type === "diagram" || n.type === "group",
+        );
+        if (!content.length) return null;
+        return getNodesBounds(content);
       },
     });
     return () => registerExportRuntime(null);
@@ -247,11 +272,31 @@ export function Canvas() {
     if (busy !== null || !was) return;
 
     if (REHEARSE_ON_BUSY.has(was)) {
+      // Hide the real canvas *now*, in this same tick — not once the sketch
+      // is actually ready 560ms from now. `doc` finishes updating to the new
+      // diagram in the same store update that clears `busy`, so the doc-sync
+      // effect above is about to render the complete result in full; without
+      // this, that full render paints first and sits on screen for the
+      // entire 560ms wait, and only then does the sketch hide it and start
+      // "redrawing" something the user just watched finish — reading as a
+      // replay of an animation that already happened, not the reveal it's
+      // meant to be.
+      setRehearsing(true);
       const id = window.setTimeout(() => {
         // Let React Flow finish swapping nodes + the fitView settle, then
         // capture a stable snapshot so the strokes land exactly on the diagram.
         const current = useDiagram.getState().doc;
-        if (current.nodes.length < 2 || current === rehearseDocRef.current) return;
+        if (current.nodes.length < 2 || current === rehearseDocRef.current) {
+          setRehearsing(false); // nothing to rehearse — reveal what's already there
+          setGenerationProgress(null);
+          setGenerationPlan(null);
+          return;
+        }
+        // Known up front, before the first `onNodeStart` fires below — the
+        // same order RehearsalOverlay will draw them in, so the Copilot
+        // panel can show the whole todo list immediately instead of
+        // learning it one label at a time.
+        setGenerationPlan(current.nodes.map((node) => node.label));
         setRehearsal({
           key: Date.now(),
           doc: current,
@@ -358,6 +403,8 @@ export function Canvas() {
       setSelection(
         selectedNodes.filter((n) => n.type === "diagram").map((n) => n.id),
       );
+      const box = selectedNodes.find((n) => n.type === "group");
+      setSelectedGroup(box ? box.id.replace(/^group__/, "") : null);
       setEdgeSelection(selectedEdges.map((e) => e.id));
     },
     [setSelection, setEdgeSelection],
@@ -398,7 +445,6 @@ export function Canvas() {
     > = {
       node: { kind: "process", label: "Process" },
       text: { kind: "note", label: "Text", textOnly: true },
-      shape: { kind: "decision", label: "Decision" },
     };
     const spec = PLACEMENT[tool];
     if (!spec) return;
@@ -466,12 +512,100 @@ export function Canvas() {
       document: "Document",
       queue: "Queue",
     };
+    const assetSpec = ASSET_LIBRARY.find((a) => a.kind === kind);
     insertAt({
       id: `node_${Date.now().toString(36)}`,
       label: labels[kind] ?? "New node",
       kind,
       position: point,
+      ...(assetSpec?.size ? { size: assetSpec.size } : {}),
     });
+  };
+
+  /* --------------------------------------------------------- pencil tool */
+  // Freehand ink, captured as raw screen points while the pointer is down
+  // and only turned into anything real on release — a small standalone SVG
+  // sized to exactly what was drawn, dropped in as an image node the same
+  // way a dragged-in icon or pasted picture already lands. That reuses every
+  // bit of existing machinery (move, resize, delete, export, undo) instead
+  // of teaching the schema, the backend, and every consumer of DiagramDoc a
+  // second kind of canvas content.
+
+  const [drawPoints, setDrawPoints] = useState<{ x: number; y: number }[] | null>(null);
+  const lastDrawPoint = useRef<{ x: number; y: number } | null>(null);
+
+  /** A light quadratic smoothing pass — each segment curves through the
+   *  midpoint of its two neighbours instead of a hard corner at every
+   *  sampled point, which is what makes a raw pointer trail look hand-drawn
+   *  rather than faceted. */
+  const smoothPath = (points: { x: number; y: number }[]): string => {
+    if (points.length < 2) return "";
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length - 1; i++) {
+      const mx = (points[i].x + points[i + 1].x) / 2;
+      const my = (points[i].y + points[i + 1].y) / 2;
+      d += ` Q ${points[i].x} ${points[i].y} ${mx} ${my}`;
+    }
+    const last = points[points.length - 1];
+    d += ` L ${last.x} ${last.y}`;
+    return d;
+  };
+
+  const onDrawPointerDown = (event: React.PointerEvent) => {
+    if (tool !== "draw") return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const start = { x: event.clientX, y: event.clientY };
+    lastDrawPoint.current = start;
+    setDrawPoints([start]);
+  };
+
+  const onDrawPointerMove = (event: React.PointerEvent) => {
+    if (!drawPoints) return;
+    const last = lastDrawPoint.current;
+    // A small minimum step keeps the point list (and later, the path string)
+    // from growing by one entry per pixel of mouse jitter.
+    if (last && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 2) return;
+    const next = { x: event.clientX, y: event.clientY };
+    lastDrawPoint.current = next;
+    setDrawPoints((points) => (points ? [...points, next] : points));
+  };
+
+  const onDrawPointerUp = () => {
+    const points = drawPoints;
+    setDrawPoints(null);
+    lastDrawPoint.current = null;
+    // A stray click, not a stroke — nothing worth turning into a node.
+    if (!points || points.length < 3) return;
+
+    const flowPoints = points.map((p) => screenToFlowPosition(p));
+    const minX = Math.min(...flowPoints.map((p) => p.x));
+    const minY = Math.min(...flowPoints.map((p) => p.y));
+    const maxX = Math.max(...flowPoints.map((p) => p.x));
+    const maxY = Math.max(...flowPoints.map((p) => p.y));
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+
+    // Shifted to start at (0,0) so the SVG's own viewBox — not an absolute
+    // canvas coordinate — is what the path is drawn against.
+    const local = flowPoints.map((p) => ({ x: p.x - minX + DRAW_PAD, y: p.y - minY + DRAW_PAD }));
+    const boxW = width + DRAW_PAD * 2;
+    const boxH = height + DRAW_PAD * 2;
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${boxW} ${boxH}">` +
+      `<path d="${smoothPath(local)}" fill="none" stroke="${DRAW_STROKE}" ` +
+      `stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+    insertAt({
+      id: `draw_${Date.now().toString(36)}`,
+      label: "Drawing",
+      kind: "note",
+      position: { x: minX - DRAW_PAD, y: minY - DRAW_PAD },
+      imageUrl: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+      size: { width: boxW, height: boxH },
+      style: { textOnly: true },
+    });
+    // Stays in "draw" — a sketch is rarely one stroke, so switching back to
+    // "select" after every single line would undo the tool pick constantly.
   };
 
   /* ------------------------------------------------ selected-node actions */
@@ -505,6 +639,10 @@ export function Canvas() {
   const deleteSelected = () => {
     const current = useDiagram.getState().doc;
     const ids = selNodeIds();
+    if (!ids.length && selectedGroup) {
+      deleteSelectedGroup();
+      return;
+    }
     setDoc({
       ...current,
       nodes: current.nodes.filter((n) => !ids.includes(n.id)),
@@ -569,10 +707,13 @@ export function Canvas() {
     const current = useDiagram.getState().doc;
     const ids = selNodeIds();
     if (!ids.length) return;
+    const spec = ASSET_LIBRARY.find((a) => a.kind === kind);
     setDoc({
       ...current,
       nodes: current.nodes.map((n) =>
-        ids.includes(n.id) ? { ...n, kind } : n,
+        ids.includes(n.id)
+          ? { ...n, kind, ...(spec?.size ? { size: spec.size } : {}) }
+          : n,
       ),
     });
   };
@@ -641,46 +782,136 @@ export function Canvas() {
     });
   };
 
-  /** Group (or, on a second click, ungroup) the current multi-selection.
-   *  Purely visual: a shared `style.groupId` drives the dashed box below and
-   *  lets members drag together — no schema change, nothing the backend or
-   *  layout engine needs to know about. */
+  /** Shared by the wedge/hub "Title text" and "Description text" panels —
+   *  same merge-a-patch-into-one-style-key shape as every setter above,
+   *  just one level deeper since each field's format is its own object
+   *  rather than a single flat value. */
+  const setSelectedTextFormat = (field: "titleFormat" | "descFormat", patch: Partial<TextFormat>) => {
+    const current = useDiagram.getState().doc;
+    const ids = selNodeIds();
+    if (!ids.length) return;
+    setDoc({
+      ...current,
+      nodes: current.nodes.map((n) => {
+        if (!ids.includes(n.id)) return n;
+        const existing = { ...((n.style?.[field] as TextFormat | undefined) ?? {}) };
+        for (const [key, val] of Object.entries(patch)) {
+          if (val === undefined) delete (existing as Record<string, unknown>)[key];
+          else (existing as Record<string, unknown>)[key] = val;
+        }
+        const style = { ...(n.style ?? {}), [field]: existing };
+        return { ...n, style };
+      }),
+    });
+  };
+  const setSelectedTitleFormat = (patch: Partial<TextFormat>) => setSelectedTextFormat("titleFormat", patch);
+  const setSelectedDescFormat = (patch: Partial<TextFormat>) => setSelectedTextFormat("descFormat", patch);
+
+  /** Wrap the current multi-selection in a container, or — if they are
+   *  already all in the same one — take them back out of it. The container is
+   *  a real part of the document: the backend lays it out, the AI can edit it,
+   *  and it exports with the diagram. */
   const groupSelected = () => {
     const current = useDiagram.getState().doc;
     const ids = selNodeIds();
     if (ids.length < 2) return;
 
     const targets = current.nodes.filter((n) => ids.includes(n.id));
-    const groupIds = new Set(
-      targets.map((n) => n.style?.groupId).filter(Boolean),
-    );
-    const alreadyOneGroup =
-      groupIds.size === 1 && targets.every((n) => n.style?.groupId);
-    const nextGroupId = alreadyOneGroup
-      ? null
-      : `grp_${Date.now().toString(36)}`;
+    const existing = new Set(targets.map((n) => n.group).filter(Boolean));
+    const alreadyOne = existing.size === 1 && targets.every((n) => n.group);
 
-    setDoc({
+    if (alreadyOne) {
+      const freed = [...existing][0];
+      const next = {
+        ...current,
+        nodes: current.nodes.map((n) =>
+          ids.includes(n.id) ? { ...n, group: null } : n,
+        ),
+        // The container is left in place only if something else still sits in
+        // it; an emptied one would draw nothing, so drop it.
+        groups: (current.groups ?? []).filter(
+          (g) =>
+            g.id !== freed ||
+            current.nodes.some((n) => !ids.includes(n.id) && n.group === freed) ||
+            (current.groups ?? []).some((g2) => g2.parent === freed),
+        ),
+      };
+      setDoc({ ...next, groups: computeGroupRects(next) });
+      return;
+    }
+
+    // Nest inside whatever container already holds all of the selection, so
+    // grouping two nodes in a subnet makes a box inside that subnet.
+    const shared = targets[0].group ?? null;
+    const parent = targets.every((n) => (n.group ?? null) === shared)
+      ? shared
+      : null;
+    const id = `group_${Date.now().toString(36)}`;
+    const next = {
       ...current,
-      nodes: current.nodes.map((n) => {
-        if (!ids.includes(n.id)) return n;
-        const style = { ...(n.style ?? {}) };
-        if (nextGroupId) style.groupId = nextGroupId;
-        else delete style.groupId;
-        return { ...n, style };
-      }),
-    });
+      nodes: current.nodes.map((n) =>
+        ids.includes(n.id) ? { ...n, group: id } : n,
+      ),
+      groups: [
+        ...(current.groups ?? []),
+        { id, label: "Group", parent, collapsed: false, rect: null },
+      ],
+    };
+    setDoc({ ...next, groups: computeGroupRects(next) });
   };
 
-  /* ------------------------------------------------------ group dragging */
-  // Dragging one member of a group carries the rest along. Positions are
-  // captured from onNodeDragStart so the applied delta stays exact even
-  // after snap-to-grid rounding on the node actually being dragged.
+  /* ------------------------------------------------- container selection */
+  // Local rather than in the store: `selection` there means "selected nodes",
+  // which the style panel and toolbar both rely on.
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+
+  const deleteSelectedGroup = () => {
+    const current = useDiagram.getState().doc;
+    const doomed = (current.groups ?? []).find((g) => g.id === selectedGroup);
+    if (!doomed) return;
+    // Removing a boundary shouldn't flatten what it held: children rise to
+    // the deleted container's own parent, mirroring the agent's delete_group.
+    const next = {
+      ...current,
+      nodes: current.nodes.map((n) =>
+        n.group === doomed.id ? { ...n, group: doomed.parent ?? null } : n,
+      ),
+      groups: (current.groups ?? [])
+        .filter((g) => g.id !== doomed.id)
+        .map((g) =>
+          g.parent === doomed.id ? { ...g, parent: doomed.parent ?? null } : g,
+        ),
+    };
+    setDoc({ ...next, groups: computeGroupRects(next) });
+    setSelectedGroup(null);
+  };
+
+
+  /* -------------------------------------------------- container dragging */
+  // Dragging a container's header strip carries everything inside it.
+  // Dragging a node *within* a container just moves that node, and the box
+  // regrows around it — that's computeGroupRects, applied in fromFlow.
+  // Positions are captured on drag start so the applied delta stays exact
+  // even after snap-to-grid rounding on the element actually being dragged.
   const dragStart = useRef<Map<string, { x: number; y: number }> | null>(null);
+  // Every React Flow element that rides along with the container being
+  // dragged: its member nodes plus the boxes of any container nested inside
+  // it. Resolved once on drag start rather than recomputed per frame.
+  const dragRiders = useRef<Set<string>>(new Set());
+
+  const draggedGroupId = (node: FlowNode) =>
+    node.type === "group" ? node.id.replace(/^group__/, "") : null;
 
   const onNodeDragStart = useCallback(
     (_event: unknown, node: FlowNode) => {
-      if (!node.data.style?.groupId) return;
+      const groupId = draggedGroupId(node);
+      if (!groupId) return;
+      const doc = useDiagram.getState().doc;
+      const members = membersOf(doc, groupId);
+      const boxes = (doc.groups ?? [])
+        .filter((g) => g.id !== groupId && isInside(doc, g.id, groupId))
+        .map((g) => `group__${g.id}`);
+      dragRiders.current = new Set([...members, ...boxes]);
       dragStart.current = new Map(nodes.map((n) => [n.id, n.position]));
     },
     [nodes],
@@ -688,9 +919,8 @@ export function Canvas() {
 
   const onNodeDrag = useCallback(
     (_event: unknown, node: FlowNode) => {
-      const groupId = node.data.style?.groupId;
       const starts = dragStart.current;
-      if (!groupId || !starts) return;
+      if (!draggedGroupId(node) || !starts) return;
       const from = starts.get(node.id);
       if (!from) return;
       const dx = node.position.x - from.x;
@@ -698,7 +928,7 @@ export function Canvas() {
 
       setNodes((current) =>
         current.map((n) => {
-          if (n.id === node.id || n.data.style?.groupId !== groupId) return n;
+          if (n.id === node.id || !dragRiders.current.has(n.id)) return n;
           const start = starts.get(n.id);
           if (!start) return n;
           return { ...n, position: { x: start.x + dx, y: start.y + dy } };
@@ -710,83 +940,53 @@ export function Canvas() {
 
   const onNodeDragStopWithGroup = useCallback(
     (_event: unknown, node: FlowNode) => {
-      commit();
-
-      // commit() just persisted whatever position xyflow's own store had for
-      // each node. For siblings shifted by onNodeDrag above, that can still
-      // be the pre-drag position — the drag-stop event can fire before that
-      // last in-gesture update has made it into the store, so there is no
-      // "current nodes" read here that's guaranteed to see it. Recomputing
-      // the sibling's final position from the drag's own delta sidesteps the
-      // race instead of chasing it: no store or state read involved, just
-      // arithmetic on this callback's own arguments.
-      const groupId = node.data.style?.groupId;
+      const groupId = draggedGroupId(node);
       const starts = dragStart.current;
       dragStart.current = null;
-      if (!groupId || !starts) return;
+      dragRiders.current = new Set();
+
+      // A plain node drag needs nothing but the usual commit; fromFlow
+      // regrows whatever container it landed in.
+      if (!groupId || !starts) {
+        commit();
+        return;
+      }
+
       const from = starts.get(node.id);
-      if (!from) return;
+      if (!from) {
+        commit();
+        return;
+      }
       const dx = node.position.x - from.x;
       const dy = node.position.y - from.y;
       if (dx === 0 && dy === 0) return;
 
+      // Recomputing each member's final position from the drag's own delta
+      // sidesteps a race: drag-stop can fire before the last in-gesture
+      // setNodes has reached xyflow's store, so no "current nodes" read here
+      // is guaranteed to see it. This is arithmetic on the callback's own
+      // arguments — no store read involved. One setDoc, so autosave debounces
+      // once rather than twice.
       const current = useDiagram.getState().doc;
+      const moving = membersOf(current, groupId);
       skipNextFitView.current = true;
+      const movedNodes = current.nodes.map((n) => {
+        if (!moving.has(n.id)) return n;
+        const start = starts.get(n.id);
+        if (!start) return n;
+        return { ...n, position: { x: start.x + dx, y: start.y + dy } };
+      });
       setDoc(
         {
           ...current,
-          nodes: current.nodes.map((n) => {
-            if (n.id === node.id || n.style?.groupId !== groupId) return n;
-            const start = starts.get(n.id);
-            if (!start) return n;
-            return { ...n, position: { x: start.x + dx, y: start.y + dy } };
-          }),
+          nodes: movedNodes,
+          groups: computeGroupRects({ ...current, nodes: movedNodes }),
         },
         { silent: true },
       );
     },
     [commit, setDoc],
   );
-
-  /** Dashed boundary boxes drawn under grouped nodes, in live screen space —
-   *  derived from the same `nodes` state React Flow is already rendering, so
-   *  a box tracks a drag in real time instead of only snapping after commit. */
-  const groupBoxes = (() => {
-    const bounds = new Map<
-      string,
-      { x1: number; y1: number; x2: number; y2: number }
-    >();
-    for (const n of nodes) {
-      const groupId = n.data.style?.groupId;
-      if (typeof groupId !== "string") continue;
-      const w = n.data.width ?? 0;
-      const h = n.data.height ?? 0;
-      const x1 = n.position.x;
-      const y1 = n.position.y;
-      const x2 = x1 + w;
-      const y2 = y1 + h;
-      const b = bounds.get(groupId);
-      bounds.set(
-        groupId,
-        b
-          ? {
-              x1: Math.min(b.x1, x1),
-              y1: Math.min(b.y1, y1),
-              x2: Math.max(b.x2, x2),
-              y2: Math.max(b.y2, y2),
-            }
-          : { x1, y1, x2, y2 },
-      );
-    }
-    const pad = 18;
-    return [...bounds.entries()].map(([groupId, b]) => ({
-      groupId,
-      left: (b.x1 - pad) * transform[2] + transform[0],
-      top: (b.y1 - pad) * transform[2] + transform[1],
-      width: (b.x2 - b.x1 + pad * 2) * transform[2],
-      height: (b.y2 - b.y1 + pad * 2) * transform[2],
-    }));
-  })();
 
   /** The fitted "page" the flow was laid out to (slide / A4 / …), mapped into
    *  live screen space so the dashed frame tracks pan/zoom like the nodes. */
@@ -847,16 +1047,18 @@ export function Canvas() {
         })()
       : null;
 
-  const panOnDrag = tool !== "select";
+  const panOnDrag = tool !== "select" && tool !== "draw";
 
   return (
     <div
       className="absolute inset-0"
-      // While the pencil rehearsal plays, the real nodes/edges are hidden —
-      // otherwise they're already fully rendered underneath from the first
-      // frame, so the "sketch" reads as a redundant scribble drawn on top of
-      // a diagram that's visibly already there, not a reveal.
-      data-rehearsing={rehearsal ? "true" : undefined}
+      // While the pencil rehearsal plays — and for the brief settle-and-fit
+      // window just before it starts, see `rehearsing` above — the real
+      // nodes/edges are hidden — otherwise they're already fully rendered
+      // underneath from the first frame, so the "sketch" reads as a
+      // redundant scribble drawn on top of a diagram that's visibly already
+      // there, not a reveal.
+      data-rehearsing={rehearsing ? "true" : undefined}
       data-edit-fade={editFade ? "true" : undefined}
       onDragOver={(event) => {
         event.preventDefault();
@@ -923,29 +1125,6 @@ export function Canvas() {
         </div>
       )}
 
-      {/* Group boundaries paint before the canvas so they sit visually behind
-          every node; purely decorative, hence pointer-events: none. */}
-      {groupBoxes.length > 0 && (
-        <div className="pointer-events-none absolute inset-0">
-          {groupBoxes.map((box) => (
-            <div
-              key={box.groupId}
-              style={{
-                position: "absolute",
-                left: box.left,
-                top: box.top,
-                width: box.width,
-                height: box.height,
-                border: "1.5px dashed var(--green-line)",
-                borderRadius: 12,
-                background: "var(--green-soft)",
-                opacity: 0.6,
-              }}
-            />
-          ))}
-        </div>
-      )}
-
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -1007,6 +1186,39 @@ export function Canvas() {
         )}
       </ReactFlow>
 
+      {/* Captures the actual stroke. Only interactive in "draw" — pointer-
+          events stays off otherwise so this transparent sheet never shadows
+          normal node interaction. Sits above the canvas (z-6, same tier as
+          the drop-target hint below) but under the toolbar (z-8), so the
+          toolbar stays clickable — including the one button that gets you
+          back out of draw mode — the whole time a stroke is in progress. */}
+      <div
+        className={`absolute inset-0 z-[6] ${tool === "draw" ? "cursor-crosshair" : "pointer-events-none"}`}
+        onPointerDown={onDrawPointerDown}
+        onPointerMove={onDrawPointerMove}
+        onPointerUp={onDrawPointerUp}
+        onPointerCancel={onDrawPointerUp}
+      >
+        {drawPoints && drawPoints.length > 1 && (
+          // `fixed`, not `absolute` — drawPoints are raw viewport
+          // client coordinates (what screenToFlowPosition below also
+          // expects), and this div's own box doesn't start at the
+          // viewport's origin, so `absolute` would draw the preview
+          // offset from the actual cursor by however far the canvas
+          // itself sits from the top-left of the page.
+          <svg className="pointer-events-none fixed inset-0 size-full">
+            <path
+              d={smoothPath(drawPoints)}
+              fill="none"
+              stroke="var(--ink)"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
+      </div>
+
       <input
         ref={imageInputRef}
         type="file"
@@ -1029,7 +1241,15 @@ export function Canvas() {
           key={rehearsal.key}
           doc={rehearsal.doc}
           transform={rehearsal.transform}
-          onDone={() => setRehearsal(null)}
+          onNodeStart={(node, index, total) =>
+            setGenerationProgress({ label: node.label, index, total })
+          }
+          onDone={() => {
+            setRehearsal(null);
+            setRehearsing(false); // reveal the real (now-matching) canvas
+            setGenerationProgress(null);
+            setGenerationPlan(null);
+          }}
         />
       )}
 
@@ -1073,6 +1293,8 @@ export function Canvas() {
               ? selData.style.fontSize
               : null
           }
+          titleFormat={(selData?.style?.titleFormat as TextFormat | undefined) ?? {}}
+          descFormat={(selData?.style?.descFormat as TextFormat | undefined) ?? {}}
           onEdit={editSelected}
           onDuplicate={duplicateSelected}
           onConnect={() => setTool("connector")}
@@ -1082,6 +1304,8 @@ export function Canvas() {
           onSetColor={setSelectedColor}
           onSetLineStyle={setSelectedLineStyle}
           onSetOpacity={setSelectedOpacity}
+          onSetTitleFormat={setSelectedTitleFormat}
+          onSetDescFormat={setSelectedDescFormat}
           onSetFontSize={setSelectedFontSize}
         />
       )}
