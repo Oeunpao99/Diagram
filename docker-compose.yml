@@ -1,5 +1,10 @@
 # Postgres only. The API and the web app run on your machine so you keep
 # hot reload. `docker compose up -d` is all you need before migrating.
+#
+# Host port is overridable — e.g. on a box that already has something else
+# on 5432, run `DIAGRAM_DB_PORT=5434 docker compose up -d db` (or set it in
+# a local, untracked `.env` next to this file — Compose reads that
+# automatically) instead of editing this file.
 services:
   db:
     image: postgres:16-alpine
@@ -9,7 +14,7 @@ services:
       POSTGRES_PASSWORD: diagram
       POSTGRES_DB: diagram
     ports:
-      - "5432:5432"
+      - "${DIAGRAM_DB_PORT:-5432}:5432"
     volumes:
       - diagram-pgdata:/var/lib/postgresql/data
     healthcheck:

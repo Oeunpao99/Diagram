@@ -56,6 +56,27 @@ If you prefer, `make install && make db && make migrate && make seed` does the s
 
 ---
 
+## Running on a host where those ports are already taken
+
+Postgres (`5432`) and the API (`8000`) are both overridable so this can run
+alongside another stack on the same box without editing any tracked file:
+
+```bash
+DIAGRAM_DB_PORT=5434 docker compose up -d db
+# backend/.env: DATABASE_URL=postgresql+asyncpg://diagram:diagram@localhost:5434/diagram
+cd backend && uv run uvicorn app.main:app --reload --port 8010
+cd frontend && API_PORT=8010 npm run dev
+```
+
+Or with `make`: `make db DIAGRAM_DB_PORT=5434`, `make api API_PORT=8010`,
+`make web API_PORT=8010`. The frontend's own dev port (`5173`) doesn't need
+changing unless it's *also* taken — Vite falls back to the next free one on
+its own. `backend/.env`'s `DATABASE_URL` is the one thing that always has to
+be kept in sync by hand, since Postgres itself has no way to tell the
+backend which port Compose published it on.
+
+---
+
 ## Environment
 
 `backend/.env`:
