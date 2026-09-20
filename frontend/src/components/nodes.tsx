@@ -273,6 +273,21 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
     }
   }, [editingDesc, data.description]);
 
+  // A node dropped by double-click-on-canvas carries a one-shot `autoEdit`
+  // flag from Canvas's doc-sync effect: open its label editor immediately so
+  // the user can just start typing. Cleared here so it can never re-open.
+  useEffect(() => {
+    if (!data.autoEdit) return;
+    setNodes((current) =>
+      current.map((n) =>
+        n.id === id && n.data.autoEdit
+          ? { ...n, data: { ...n.data, autoEdit: false } }
+          : n,
+      ),
+    );
+    setEditing(true);
+  }, [data.autoEdit, id, setNodes]);
+
   const finishEditing = (commit: boolean) => {
     if (commit) commitLabel(id, draft);
     setEditing(false);

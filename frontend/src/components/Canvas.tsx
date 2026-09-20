@@ -203,6 +203,11 @@ export function Canvas() {
         ? new Set([...currentIds].filter((id) => !prevNodeIds.current!.has(id)))
         : new Set<string>();
     prevNodeIds.current = currentIds;
+    // One-shot marker for a node placed by double-click-to-add-text, so its
+    // component can open the editor as soon as it renders (nodes.tsx reads
+    // it). Consumed here rather than left dangling on the next sync.
+    const pendingEditId = pendingEditRef.current;
+    pendingEditRef.current = null;
 
     // Carry over `measured`/`selected` for nodes that already existed: toFlow
     // builds fresh objects every call, and handing React Flow an "unmeasured"
@@ -228,8 +233,16 @@ export function Canvas() {
         const flagged = justAdded.has(n.id)
           ? { ...merged, data: { ...merged.data, justAdded: true } }
           : merged;
+        // The just-placed double-click text node gets a one-shot pick-me-up:
+        // its editor opens as soon as it renders (see nodes.tsx), then
+        // autoEdit is cleared from the flow node and never syncs back to the
+        // doc.
+        const withEdit =
+          pendingEditId === n.id
+            ? { ...flagged, data: { ...flagged.data, autoEdit: true } }
+            : flagged;
         if (!changed) {
-          const nd = flagged.data;
+          const nd = withEdit.data;
           changed = !prev;
           if (prev && !changed) {
             const pd = prev.data;
@@ -243,7 +256,7 @@ export function Canvas() {
               pd.justAdded !== nd.justAdded;
           }
         }
-        return flagged;
+        return withEdit;
       });
       return changed ? next : prevNodes;
     });
@@ -454,6 +467,29 @@ export function Canvas() {
     setDoc({ ...current, nodes: [...current.nodes, makeNode(spec)] });
   };
 
+  // Double-click detection for the pane in select mode: React Flow has no
+  // onPaneDoubleClick, so two pane clicks within ~350ms and ~8px read as the
+  // double-click that drops a text node (and opens its editor — see
+  // pendingEditRef). Single clicks keep their usual select/deselect job.
+  const lastPaneClick = useRef<{ time: number; x: number; y: number } | null>(null);
+  // The node id that should open its label editor the moment it reaches the
+  // canvas — set alongside insertAt so the doc-sync effect can tag exactly
+  // that flow node with autoEdit.
+  const pendingEditRef = useRef<string | null>(null);
+
+  const addTextNodeAt = (event: React.MouseEvent) => {
+    const point = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+    const id = `node_${Date.now().toString(36)}`;
+    pendingEditRef.current = id;
+    insertAt({
+      id,
+      label: "Text",
+      kind: "note",
+      position: point,
+      style: { textOnly: true },
+    });
+  };
+
   /* --------------------------------------------- click-to-place tools */
   // "select", "hand" and "connector" don't place anything on a pane click —
   // connector's whole job is dragging between two ports, and click-placing
@@ -464,8 +500,23 @@ export function Canvas() {
   const imageDropPoint = useRef<{ x: number; y: number } | null>(null);
 
   const onPaneClick = (event: React.MouseEvent) => {
+    // In select mode a double-click on empty canvas is "place a text node",
+    // not React Flow's default zoom — see addTextNodeAt above.
+    if (tool === "select") {
+      const now = Date.now();
+      const prev = lastPaneClick.current;
+      const isDouble =
+        !!prev &&
+        now - prev.time < 350 &&
+        Math.hypot(event.clientX - prev.x, event.clientY - prev.y) < 8;
+      lastPaneClick.current = { time: now, x: event.clientX, y: event.clientY };
+      if (isDouble) {
+        lastPaneClick.current = null; // a third click isn't another double-click
+        addTextNodeAt(event);
+      }
+      return;
+    }
     if (
-      tool === "select" ||
       tool === "hand" ||
       tool === "connector" ||
       tool === "group"
@@ -1195,7 +1246,9 @@ export function Canvas() {
         panOnScroll
         snapToGrid={prefs.snap}
         snapGrid={[8, 8]}
-        zoomOnDoubleClick={tool === "select"}
+        // Double-click on empty canvas drops a text node, so React Flow's
+        // zoom-on-double-click has to stay off — see onPaneClick above.
+        zoomOnDoubleClick={false}
         deleteKeyCode={["Backspace", "Delete"]}
         proOptions={{ hideAttribution: true }}
         minZoom={0.15}

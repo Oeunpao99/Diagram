@@ -104,6 +104,10 @@ export interface FlowNodeData extends Record<string, unknown> {
   /** Set for exactly one sync — the one where an edit introduced this node —
    *  so it can get a brief "just landed" highlight. Never persisted. */
   justAdded?: boolean;
+  /** One-shot flag set for the node just dropped by double-click-to-add-text,
+   *  telling its component to open the label editor immediately. Cleared (and
+   *  never persisted) as soon as the node renders. */
+  autoEdit?: boolean;
   /** Only set on the synthetic "title" node — the diagram's title/summary,
    *  drawn as a heading above the flow instead of living only in the top
    *  bar's title field. */
