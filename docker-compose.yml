@@ -42,6 +42,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${DIAGRAM_API_PORT:-8000}:8000"
     restart: unless-stopped
@@ -50,7 +56,8 @@ services:
     build: ./frontend
     container_name: diagram-frontend
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${DIAGRAM_WEB_PORT:-8080}:80"
     restart: unless-stopped
