@@ -209,28 +209,67 @@ export function Canvas() {
     // node it already knows about triggers a dimensions remeasure — harmless
     // on its own, but see the fitView note below for why it used to look like
     // a drag was being undone.
+    // Bail out of the write when the sync produced nothing new — same ids,
+    // positions, sizes, labels and highlight flags. Handing React Flow a
+    // brand-new array with identical content each time is what feeds the
+    // classic xyflow "Maximum update depth exceeded" crash-on-setNodes loop
+    // (xyflow #2571 / #4521): each write wobbles the internal store, the
+    // wobble re-runs this effect, and the re-run writes again. Returning the
+    // previous array reference lets React and React Flow both see "nothing
+    // changed" and bail, so that cascade dies instead of amplifying.
     setNodes((prevNodes) => {
       const prevById = new Map(prevNodes.map((n) => [n.id, n]));
-      return flow.nodes.map((n) => {
+      let changed = prevNodes.length !== flow.nodes.length;
+      const next = flow.nodes.map((n) => {
         const prev = prevById.get(n.id);
         const merged = prev
           ? { ...n, measured: prev.measured, selected: prev.selected }
           : n;
-        return justAdded.has(n.id)
+        const flagged = justAdded.has(n.id)
           ? { ...merged, data: { ...merged.data, justAdded: true } }
           : merged;
+        if (!changed) {
+          const nd = flagged.data;
+          changed = !prev;
+          if (prev && !changed) {
+            const pd = prev.data;
+            changed =
+              prev.position.x !== n.position.x ||
+              prev.position.y !== n.position.y ||
+              pd.width !== nd.width ||
+              pd.height !== nd.height ||
+              pd.label !== nd.label ||
+              pd.kind !== nd.kind ||
+              pd.justAdded !== nd.justAdded;
+          }
+        }
+        return flagged;
       });
+      return changed ? next : prevNodes;
     });
     // Same carry-over for edges: toFlow builds fresh objects every call, and
     // replacing `selected`-carrying edges with bare ones would drop the
     // highlight the user is actively working against each time a style
-    // change round-trips through setDoc.
+    // change round-trips through setDoc. Same bail-out as the nodes above —
+    // a re-run that has nothing new to say returns the same array reference
+    // instead of feeding the re-render loop.
     setEdges((prevEdges) => {
       const prevById = new Map(prevEdges.map((e) => [e.id, e]));
-      return flow.edges.map((e) => {
+      let changed = prevEdges.length !== flow.edges.length;
+      const next = flow.edges.map((e) => {
         const prev = prevById.get(e.id);
-        return prev ? { ...e, selected: prev.selected } : e;
+        const merged = prev ? { ...e, selected: prev.selected } : e;
+        if (!changed) {
+          changed =
+            !prev ||
+            prev.source !== e.source ||
+            prev.target !== e.target ||
+            prev.label !== e.label ||
+            (prev.style?.stroke ?? null) !== (e.style?.stroke ?? null);
+        }
+        return merged;
       });
+      return changed ? next : prevEdges;
     });
     const skipFit = takeSkipNextDocFit() || skipNextFitView.current;
     skipNextFitView.current = false;
