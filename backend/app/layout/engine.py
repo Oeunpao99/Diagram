@@ -70,7 +70,7 @@ def _sizes(doc: DiagramDoc) -> None:
         # *schema* default (Position/Size never changed) — that's the "still
         # unsized" sentinel, independent of what these boxes actually grow to.
         if node.size.width in (0, 180):
-            node.size.width = max(w, min(320, 26 + len(node.label) * 8.6))
+            node.size.width = max(w, min(300, 26 + len(node.label) * 8.2))
         if node.size.height in (0, 64):
             node.size.height = h
 

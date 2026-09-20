@@ -57,13 +57,16 @@ Rules:
   rectangle is computed downstream from whatever the group contains.
 - A group must not be its own ancestor, and a node belongs to exactly one group
   (the innermost one) — membership in the parents is implied by nesting.
-- A node's `style.color` is optional — omit it to leave the node its default
-  look. Set it either when the user explicitly asks to colour, highlight, or
-  recolour something, or when the process itself has distinct categories
-  worth telling apart at a glance (see the quality guide below); otherwise
-  leave it off rather than colouring for decoration. Accepted values: teal,
-  emerald, blue, indigo, violet, fuchsia, rose, orange, amber, slate, or a raw
-  "#rrggbb" hex string.
+- A node's `style.color` is expected on generated diagrams — an all-grey
+  diagram reads unfinished. Colour by default: build one coherent palette of
+  2-5 colours from the accepted values below and assign it by role so the
+  structure is readable at a glance — start/end pills and decision diamonds
+  one colour each, process steps a second, then colour each remaining
+  category (departments, stages, data stores, protected vs. public paths) out
+  of that palette. Leave a node uncoloured only when the user asked for a
+  plain look, or when the node carries an AWS/Azure icon (see below).
+  Accepted values: teal, emerald, blue, indigo, violet, fuchsia, rose,
+  orange, amber, slate, or a raw "#rrggbb" hex string.
 - `icon` draws a small glyph beside the label, which is what makes a system or
   architecture diagram readable at a glance. It must be one of the keys listed
   below, exactly — an unlisted key renders nothing, so never invent one. Pick
@@ -190,12 +193,14 @@ For every type:
   already carried by the verb ("Review request"), leave it off; a diagram
   where every box wears a vaguely-related glyph reads as noisier, not richer.
 - Audit, async, background, or looping flows use dashed edges.
-- If the user's own description implies distinct categories worth telling
-  apart at a glance — departments, stages, protected vs. unprotected paths,
-  a lead/customer-facing step vs. an internal one — colour each node by
-  `style.color` for its category (see the schema below) rather than leaving
-  everything uncoloured; a request like this is exactly what colour is for,
-  not something that needs to be separately asked for.
+- Colour is part of a finished diagram, not an extra a user has to request.
+  As soon as the content has any structure worth telling apart at a glance —
+  kinds, stages, departments, lanes, a lead/customer-facing step vs. an
+  internal one, protected vs. unprotected paths — assign `style.color` per
+  category from a coherent 2-5 colour palette (start/end and decisions get
+  their own colours too). Recolour on the edit agent works the same way:
+  when the user asks to restyle or "make it look nicer", default to a
+  coherent palette, not a single paint bucket over the whole diagram.
 - Never emit x/y positions — that stays with the layout engine.
 """
 
