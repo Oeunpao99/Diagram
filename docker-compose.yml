@@ -5,6 +5,10 @@
 # on 5432, run `DIAGRAM_DB_PORT=5434 docker compose up -d db` (or set it in
 # a local, untracked `.env` next to this file — Compose reads that
 # automatically) instead of editing this file.
+#
+# For production, `docker compose up -d --build` runs the whole stack
+# (db + backend + nginx-served frontend). Host ports are overridable via
+# `DIAGRAM_DB_PORT`, `DIAGRAM_API_PORT` (`8000`) and `DIAGRAM_WEB_PORT` (`8080`).
 services:
   db:
     image: postgres:16-alpine
@@ -22,6 +26,34 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    build: ./backend
+    container_name: diagram-backend
+    # Secrets (Azure key, JWT secret) from backend/.env — never baked into
+    # the image. The DATABASE_URL / APP_ENV / CORS lines below override the
+    # local ones so the container talks to the db service instead of localhost.
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://diagram:diagram@db:5432/diagram
+      CORS_ORIGINS: http://localhost:${DIAGRAM_WEB_PORT:-8080},http://127.0.0.1:${DIAGRAM_WEB_PORT:-8080}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${DIAGRAM_API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: diagram-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${DIAGRAM_WEB_PORT:-8080}:80"
+    restart: unless-stopped
 
 volumes:
   diagram-pgdata:
