@@ -25,8 +25,15 @@ const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url ca
 
 /** Ideas to prime an empty canvas — real prompts a user could actually send.
  *  Kept short: one business-process example, one technical one, enough to
- *  show the range without turning into a wall of chips. */
-const STARTER_IDEAS = ["Employee onboarding process", "Microservice deployment pipeline"];
+ *  show the range without turning into a wall of chips. Clicking one sends
+ *  it straight through improve → generate, so a first-time visitor lands a
+ *  diagram in two clicks instead of learning the whole flow first. */
+const STARTER_IDEAS = [
+  "Employee onboarding process",
+  "Microservice deployment pipeline",
+  "Online order to dispatch flow with colors by stage",
+  "Purchase order approval with rejection loop",
+];
 
 /** Once a diagram exists, these describe edits instead — one per thing the
  *  agent can do, so the range is discoverable without reading docs: a
@@ -300,10 +307,22 @@ export function Copilot() {
 
       <div className="no-scrollbar flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-3.5 py-3.5">
         {messages.length === 0 && !improved && (
-          <p style={{ fontSize: 12.5, lineHeight: 1.6, color: "var(--slate)", padding: "4px 2px" }}>
-            Describe a process, system, or workflow below — try one of the ideas in the box, or
-            write your own. I&apos;ll sharpen the prompt, then generate an editable diagram from it.
-          </p>
+          <div className="px-1 pt-1">
+            <h2 className="m-0 text-[13.5px] font-bold tracking-[-0.01em] text-ink">
+              Build your first diagram
+            </h2>
+            <p
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                color: "var(--slate)",
+                padding: "6px 2px 0",
+              }}
+            >
+              Describe a process, system, or workflow, or click an example below — it&apos;ll
+              sharpen the prompt, then generate an editable diagram you can keep tweaking.
+            </p>
+          </div>
         )}
 
         {messages.map((message) => (
@@ -648,11 +667,13 @@ export function Copilot() {
             </div>
           )}
           <div className="no-scrollbar mb-1.5 flex gap-1 overflow-x-auto pb-1">
+            {!hasNodes && <span className="shrink-0 text-[11px] font-[550] text-slate-soft">Try an example —</span>}
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion}
+                title="Click to describe this diagram"
                 className={`inline-flex shrink-0 items-center gap-[5px] whitespace-nowrap rounded-full border bg-surface px-2.5 py-[5px] text-[11px] font-[550] transition-all hover:border-green hover:bg-green-soft hover:text-green-deep [&_svg]:size-[11px] ${input === suggestion ? "border-green bg-green-soft text-green-deep" : "border-line text-slate"}`}
-                onClick={() => setInput(suggestion)}
+                onClick={() => (hasNodes ? setInput(suggestion) : sendDescribe(suggestion))}
               >
                 {suggestion}
               </button>
