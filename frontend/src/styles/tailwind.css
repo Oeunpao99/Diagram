@@ -1378,6 +1378,14 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--green-deep) 18%, transparent);
 }
 
+/* The invisible half of every connector dot: a stacked target handle hiding
+   under the visible source dot. Same 20px hit area so a connection can start
+   or land here, but no dot of its own — one visible dot per position. */
+.node__port--ghost::before,
+.node__port--ghost:hover::before {
+  display: none;
+}
+
 .node__corner {
   position: absolute;
   width: 10px;

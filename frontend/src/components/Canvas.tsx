@@ -248,6 +248,11 @@ export function Canvas() {
           changed = !prev;
           if (prev && !changed) {
             const pd = prev.data;
+            // Every field the node actually renders with. A style-only change
+            // (colour, line style, opacity, font size) round-trips through
+            // setDoc and only reaches React Flow if this diff notices it — a
+            // shallow check that skipped `style` was how "pick a colour,
+            // nothing happens until you switch the shape" used to feel.
             changed =
               prev.position.x !== n.position.x ||
               prev.position.y !== n.position.y ||
@@ -255,7 +260,13 @@ export function Canvas() {
               pd.height !== nd.height ||
               pd.label !== nd.label ||
               pd.kind !== nd.kind ||
-              pd.justAdded !== nd.justAdded;
+              pd.description !== nd.description ||
+              pd.lane !== nd.lane ||
+              pd.group !== nd.group ||
+              pd.imageUrl !== nd.imageUrl ||
+              pd.icon !== nd.icon ||
+              pd.justAdded !== nd.justAdded ||
+              JSON.stringify(pd.style ?? null) !== JSON.stringify(nd.style ?? null);
           }
         }
         return withEdit;
@@ -275,12 +286,23 @@ export function Canvas() {
         const prev = prevById.get(e.id);
         const merged = prev ? { ...e, selected: prev.selected } : e;
         if (!changed) {
+          // Same principle as the node diff above: edge style fields beyond
+          // the stroke colour (dash pattern, width, arrowheads, animated
+          // curve) only land on the canvas when this check notices them.
           changed =
             !prev ||
             prev.source !== e.source ||
             prev.target !== e.target ||
+            prev.sourceHandle !== e.sourceHandle ||
+            prev.targetHandle !== e.targetHandle ||
             prev.label !== e.label ||
-            (prev.style?.stroke ?? null) !== (e.style?.stroke ?? null);
+            prev.type !== e.type ||
+            prev.animated !== e.animated ||
+            (prev.markerStart ?? null) !== (e.markerStart ?? null) ||
+            (prev.markerEnd ?? null) !== (e.markerEnd ?? null) ||
+            (prev.style?.stroke ?? null) !== (e.style?.stroke ?? null) ||
+            (prev.style?.strokeDasharray ?? null) !== (e.style?.strokeDasharray ?? null) ||
+            (prev.style?.strokeWidth ?? null) !== (e.style?.strokeWidth ?? null);
         }
         return merged;
       });
@@ -541,8 +563,12 @@ export function Canvas() {
     const spec = PLACEMENT[tool];
     if (!spec) return;
 
+    const id = `node_${Date.now().toString(36)}`;
+    // A placed text label opens its label editor the moment it lands, the
+    // same as the double-click-add path — see pendingEditRef / addTextNodeAt.
+    if (spec.textOnly) pendingEditRef.current = id;
     insertAt({
-      id: `node_${Date.now().toString(36)}`,
+      id,
       label: spec.label,
       kind: spec.kind,
       position: point,

@@ -497,13 +497,30 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
           unrendered port is also a non-connectable one. */}
       {!textOnly && (
         <>
-          <Handle type="target" position={Position.Left} className="node__port" />
-          <Handle
-            type="target"
-            position={Position.Top}
-            className="node__port"
-            id="t"
-          />
+          {/* Eight dots all around (N/NE/E/SE/S/SW/W/NW). Each dot is a
+              visible *source* plus an invisible *target* stacked under it —
+              React Flow always mixes the two open handles on the same spot,
+              so a drag out of any dot means "this node -> that node" and a
+              drop on any dot lands on the hidden target there. The ghost
+              handles keep the same ids ("t", "b", or the no-id first ones at
+              Left/Right) as the old four-dot layout, so existing edges still
+              render at their old attaching points. */}
+          <Handle type="target" position={Position.Left} className="node__port node__port--ghost" />
+          <Handle type="target" position={Position.Top} className="node__port node__port--ghost" id="t" />
+          <Handle type="target" position={Position.Right} className="node__port node__port--ghost" id="e" />
+          <Handle type="target" position={Position.Bottom} className="node__port node__port--ghost" id="s" />
+          <Handle type="target" position={Position.Top} className="node__port node__port--ghost" id="tl" style={{ left: 0, transform: "translate(-50%, -50%)" }} />
+          <Handle type="target" position={Position.Top} className="node__port node__port--ghost" id="tr" style={{ left: "100%", transform: "translate(-50%, -50%)" }} />
+          <Handle type="target" position={Position.Bottom} className="node__port node__port--ghost" id="bl" style={{ left: 0, transform: "translate(-50%, 50%)" }} />
+          <Handle type="target" position={Position.Bottom} className="node__port node__port--ghost" id="br" style={{ left: "100%", transform: "translate(-50%, 50%)" }} />
+          <Handle type="source" position={Position.Right} className="node__port" />
+          <Handle type="source" position={Position.Bottom} className="node__port" id="b" />
+          <Handle type="source" position={Position.Left} className="node__port" id="w" />
+          <Handle type="source" position={Position.Top} className="node__port" id="n" />
+          <Handle type="source" position={Position.Top} className="node__port" id="tl" style={{ left: 0, transform: "translate(-50%, -50%)" }} />
+          <Handle type="source" position={Position.Top} className="node__port" id="tr" style={{ left: "100%", transform: "translate(-50%, -50%)" }} />
+          <Handle type="source" position={Position.Bottom} className="node__port" id="bl" style={{ left: 0, transform: "translate(-50%, 50%)" }} />
+          <Handle type="source" position={Position.Bottom} className="node__port" id="br" style={{ left: "100%", transform: "translate(-50%, 50%)" }} />
         </>
       )}
       {data.imageUrl ? (
@@ -543,17 +560,6 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
           <span className="node__label" style={hubTitleFormat}>
             {data.label}
           </span>
-        </>
-      )}
-      {!textOnly && (
-        <>
-          <Handle type="source" position={Position.Right} className="node__port" />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            className="node__port"
-            id="b"
-          />
         </>
       )}
       </div>
