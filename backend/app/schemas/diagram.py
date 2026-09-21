@@ -219,9 +219,17 @@ class GenerateIconResponse(BaseModel):
 
 class ImprovePromptResponse(BaseModel):
     original: str
+    """True when the user's message is (at least trying to be) a diagram
+    request. False for a greeting / small talk / thanks — the panel shows
+    `chat_reply` as a normal chat message and skips the structured-analysis
+    card entirely."""
+    is_diagram_request: bool = True
+    """Plain-conversational reply for a non-diagram message; null when
+    `is_diagram_request` is true. The one thing the panel renders then."""
+    chat_reply: str | None = None
     improved: str
     missing_information: list[str] = Field(default_factory=list)
-    recommended_type: DiagramType
+    recommended_type: DiagramType | None = None
     recommended_template_slug: str | None = None
     reasoning: str | None = None
 

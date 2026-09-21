@@ -497,7 +497,19 @@ export const useDiagram = create<DiagramState>((set, get) => ({
   improvePrompt: async (prompt) => {
     set({ busy: "improving", error: null });
     try {
-      set({ improved: await api.improvePrompt(prompt) });
+      const result = await api.improvePrompt(prompt);
+      // A greeting / small talk / thanks came back as plain speech, not a
+      // diagram analysis — surface it as an ordinary chat message so the
+      // "Structured analysis" card (and its Generate button) never appears.
+      if (!result.is_diagram_request) {
+        set({ improved: null });
+        get().appendMessage({
+          role: "ai",
+          text: result.chat_reply ?? "Hello! Describe a process, system, or workflow and I'll draw it for you.",
+        });
+      } else {
+        set({ improved: result });
+      }
     } catch (error) {
       set({ error: message(error) });
     } finally {

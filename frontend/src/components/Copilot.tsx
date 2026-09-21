@@ -512,7 +512,7 @@ export function Copilot() {
                 <div className="border-b border-line px-[11px] py-2">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-[11px] font-[550] text-slate-soft">Diagram Type</span>
-                    <span className="text-right text-xs font-semibold text-ink">{formatType(improved.recommended_type)}</span>
+                    <span className="text-right text-xs font-semibold text-ink">{improved.recommended_type ? formatType(improved.recommended_type) : "—"}</span>
                   </div>
                 </div>
                 <div className="px-[11px] py-2">

@@ -96,13 +96,25 @@ async def improve_prompt(
 
     await _log(db, "improve", result, prompt)
     data = result.data
+    # A greeting / small talk / thanks isn't a diagram request — the prompt
+    # agent answers it in plain speech (chat_reply) instead of forcing a
+    # structured analysis. Only diagram requests carry type/template/reasoning.
+    is_diagram_request = bool(data.get("is_diagram_request", True))
     return ImprovePromptResponse(
         original=prompt,
+        is_diagram_request=is_diagram_request,
+        chat_reply=data.get("chat_reply"),
         improved=data.get("improved", prompt),
         missing_information=data.get("missing_information", []) or [],
-        recommended_type=_safe_type(data.get("recommended_type"), diagram_type),
-        recommended_template_slug=data.get("recommended_template_slug"),
-        reasoning=data.get("reasoning"),
+        recommended_type=(
+            _safe_type(data.get("recommended_type"), diagram_type)
+            if is_diagram_request
+            else None
+        ),
+        recommended_template_slug=(
+            data.get("recommended_template_slug") if is_diagram_request else None
+        ),
+        reasoning=data.get("reasoning") if is_diagram_request else None,
     )
 
 

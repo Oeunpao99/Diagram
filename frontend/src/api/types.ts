@@ -148,9 +148,15 @@ export interface ValidationReport {
 
 export interface ImprovedPrompt {
   original: string;
+  /** True when the message is (trying to be) a diagram request. False for a
+   *  greeting / small talk / thanks — then only `chat_reply` matters and the
+   *  structured-analysis card is skipped. */
+  is_diagram_request: boolean;
+  /** Plain conversational reply for a non-diagram message, null otherwise. */
+  chat_reply: string | null;
   improved: string;
   missing_information: string[];
-  recommended_type: DiagramType;
+  recommended_type: DiagramType | null;
   recommended_template_slug: string | null;
   reasoning: string | null;
 }

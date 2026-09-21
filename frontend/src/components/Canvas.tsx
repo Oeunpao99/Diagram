@@ -230,17 +230,19 @@ export function Canvas() {
         const merged = prev
           ? { ...n, measured: prev.measured, selected: prev.selected }
           : n;
-        const flagged = justAdded.has(n.id)
-          ? { ...merged, data: { ...merged.data, justAdded: true } }
-          : merged;
+        const targetForAutoEdit = pendingEditId === n.id;
+        const flagged =
+          !targetForAutoEdit && justAdded.has(n.id)
+            ? { ...merged, data: { ...merged.data, justAdded: true } }
+            : merged;
         // The just-placed double-click text node gets a one-shot pick-me-up:
-        // its editor opens as soon as it renders (see nodes.tsx), then
-        // autoEdit is cleared from the flow node and never syncs back to the
+        // its editor opens as soon as it renders (see nodes.tsx), instead of
+        // the transient just-added pulse — typing takes over as the cue. It's
+        // a transient flag on the controlled flow node, never synced to the
         // doc.
-        const withEdit =
-          pendingEditId === n.id
-            ? { ...flagged, data: { ...flagged.data, autoEdit: true } }
-            : flagged;
+        const withEdit = targetForAutoEdit
+          ? { ...flagged, data: { ...flagged.data, autoEdit: true } }
+          : flagged;
         if (!changed) {
           const nd = withEdit.data;
           changed = !prev;

@@ -274,19 +274,18 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
   }, [editingDesc, data.description]);
 
   // A node dropped by double-click-on-canvas carries a one-shot `autoEdit`
-  // flag from Canvas's doc-sync effect: open its label editor immediately so
-  // the user can just start typing. Cleared here so it can never re-open.
+  // flag from Canvas's doc-sync: open its label editor immediately so the
+  // user can just start typing. The flag lives in Canvas's *controlled* node
+  // props, so this effect must not try to clear it via setNodes — writing to
+  // React Flow's internal store would fight the parent's controlled `nodes`
+  // prop and loop (each write gets reconciled back from the prop, re-firing
+  // this effect). A local ref only ever opens the editor once per mount.
+  const autoOpened = useRef(false);
   useEffect(() => {
-    if (!data.autoEdit) return;
-    setNodes((current) =>
-      current.map((n) =>
-        n.id === id && n.data.autoEdit
-          ? { ...n, data: { ...n.data, autoEdit: false } }
-          : n,
-      ),
-    );
+    if (!data.autoEdit || autoOpened.current) return;
+    autoOpened.current = true;
     setEditing(true);
-  }, [data.autoEdit, id, setNodes]);
+  }, [data.autoEdit]);
 
   const finishEditing = (commit: boolean) => {
     if (commit) commitLabel(id, draft);
@@ -491,13 +490,22 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
         setEditing(true);
       }}
     >
-      <Handle type="target" position={Position.Left} className="node__port" />
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="node__port"
-        id="t"
-      />
+      {/* Text/label nodes have no connector ports — they're captions, not
+          shapes you link into the flow, so no dots to drag a connection from
+          (or toward). Rendering nothing beats hiding by CSS: NodeRenderer
+          only ever produces a handle for a rendered <Handle>, so an
+          unrendered port is also a non-connectable one. */}
+      {!textOnly && (
+        <>
+          <Handle type="target" position={Position.Left} className="node__port" />
+          <Handle
+            type="target"
+            position={Position.Top}
+            className="node__port"
+            id="t"
+          />
+        </>
+      )}
       {data.imageUrl ? (
         <img
           className="node__image"
@@ -537,13 +545,17 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
           </span>
         </>
       )}
-      <Handle type="source" position={Position.Right} className="node__port" />
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="node__port"
-        id="b"
-      />
+      {!textOnly && (
+        <>
+          <Handle type="source" position={Position.Right} className="node__port" />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            className="node__port"
+            id="b"
+          />
+        </>
+      )}
       </div>
       {/* The corners are a sibling of `.node`, not a child of it. clip-path —
           the diamond, and every palette clip shape — clips the whole element's

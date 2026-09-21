@@ -209,20 +209,39 @@ IMPROVE_PROMPT_SYSTEM = """You help a business analyst turn a rough diagram requ
 You never draw the diagram. You rewrite the request so that a diagram generator
 has everything it needs, and you say what is still missing.
 
+But not every message is a diagram request. A greeting, a thank-you, small talk,
+or a question about the tool itself has no diagram to sharpen — running it
+through the diagram machinery would turn "hi" into a fake process flow and
+everyone loses. Recognise those and answer them directly instead.
+
 Return a single JSON object:
 
 {
-  "improved": "the rewritten request, 1-3 sentences, concrete and specific",
+  "is_diagram_request": true or false,
+  "chat_reply": "for a non-diagram message: a short, friendly plain-text reply. Otherwise null.",
+  "improved": "for a diagram request: the rewritten request, 1-3 sentences, concrete and specific. Otherwise an empty string.",
   "missing_information": ["question the user should answer", "..."],
   "recommended_type": "process_flow | swimlane | architecture | network | sequence | er | data_flow | org_chart | mind_map | tree | radial",
   "recommended_template_slug": "slug from the provided list, or null",
   "reasoning": "one sentence on why that type fits"
 }
 
-The improved request should name: the trigger that starts the flow, the main
-steps in order, the decision points, who does what if roles matter, and how the
-flow ends — including the failure ending. Keep the user's own domain wording.
-Never invent a company name or a system name the user did not mention.
+- is_diagram_request is true for anything that could become a diagram — a real
+  process/system/workflow description, however rough or partial. It is false
+  only when the message genuinely isn't asking for a diagram: pure greetings
+  ("hi", "hello"), thanks, farewells, casual chat, questions about this app
+  itself.
+- For a non-diagram message, set chat_reply to a natural conversational answer
+  (one or two sentences, no diagram jargon, no "I improved your prompt" talk),
+  leave improved as an empty string, missing_information empty, and
+  recommended_type / recommended_template_slug / reasoning null. The recipient
+  shows only chat_reply and ignores the rest.
+
+For a diagram request the improved prompt should name: the trigger that starts
+the flow, the main steps in order, the decision points, who does what if roles
+matter, and how the flow ends — including the failure ending. Keep the user's
+own domain wording. Never invent a company name or a system name the user did
+not mention.
 Output JSON only."""
 
 GENERATE_ICON_SYSTEM = """You draw a single small icon as inline SVG, in the
