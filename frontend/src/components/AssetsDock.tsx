@@ -75,7 +75,7 @@ export function AssetsDock() {
             {ASSET_LIBRARY.map((asset) => (
               <span
                 key={asset.kind}
-                className="grid aspect-square cursor-grab place-items-center rounded-lg border border-line bg-surface text-[9.5px] text-slate transition-colors hover:border-green-line hover:bg-green-soft hover:text-green-deep [&_svg]:size-4"
+                className="grid aspect-square cursor-grab place-items-center rounded-lg text-[9.5px] text-slate transition-[color,background-color] hover:bg-green-soft hover:text-green-deep [&_svg]:size-4"
                 title={`${asset.label} (drag me)`}
                 draggable
                 onDragStart={(event) => {

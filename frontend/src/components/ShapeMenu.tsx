@@ -53,7 +53,7 @@ export function ShapeMenu() {
               <button
                 key={asset.kind}
                 role="menuitem"
-                className="grid aspect-square cursor-grab place-items-center rounded-md border border-line bg-surface text-slate transition-[border-color,color,background] hover:border-green hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[17px]"
+                className="grid aspect-square cursor-grab place-items-center rounded-md text-slate transition-[color,background-color] hover:bg-green-soft hover:text-green active:cursor-grabbing [&_svg]:size-[17px]"
                 title={`${asset.label} — click or drag onto the canvas`}
                 draggable
                 onDragStart={(event) => {
