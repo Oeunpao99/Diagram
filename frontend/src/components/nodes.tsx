@@ -168,12 +168,59 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
     atY: number;
     sx: number;
     sy: number;
+    px: number;
+    py: number;
     w: number;
     h: number;
   } | null>(null);
 
+  // Live resize writes straight to React Flow's internal store via
+  // useReactFlow().setNodes — one write per pointer event. That's the exact
+  // spot that feeds the classic xyflow "Maximum update depth exceeded" crash
+  // (canvas drags suffered the same until they were coalesced): every write
+  // notifies every internal-store subscriber synchronously while React is
+  // still mid-render, and a controlled `nodes` prop reconciles that store
+  // right back. Coalescing to one requestAnimationFrame per frame — and
+  // dropping frames whose numbers didn't actually change — keeps the sizing
+  // just as smooth, with no synchronous re-entry into the store.
+  const resizeFrame = useRef<number | null>(null);
+  const lastResize = useRef<{ px: number; py: number; w: number; h: number } | null>(null);
+
+  const flushResize = () => {
+    resizeFrame.current = null;
+    const drag = resizing.current;
+    if (!drag) return;
+    const { px, py, w, h } = drag;
+    const last = lastResize.current;
+    if (last && last.px === px && last.py === py && last.w === w && last.h === h) {
+      return; // width/height didn't move this frame — nothing to write
+    }
+    lastResize.current = { px, py, w, h };
+    setNodes((nodes) =>
+      nodes.map((n) =>
+        n.id === id
+          ? {
+              ...n,
+              position: { x: px, y: py },
+              data: { ...n.data, width: w, height: h },
+            }
+          : n,
+      ),
+    );
+  };
+
+  const scheduleResize = () => {
+    if (resizeFrame.current !== null) return; // a flush is already queued
+    resizeFrame.current = requestAnimationFrame(flushResize);
+  };
+
   const finishResize = () => {
     const drag = resizing.current;
+    if (resizeFrame.current !== null) {
+      cancelAnimationFrame(resizeFrame.current);
+      resizeFrame.current = null;
+    }
+    lastResize.current = null;
     resizing.current = null;
     if (!drag) return;
     queueSkipNextDocFit();
@@ -216,6 +263,8 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
       atY: node.position.y,
       sx: handle.sx,
       sy: handle.sy,
+      px: node.position.x,
+      py: node.position.y,
       w: data.width,
       h: data.height,
     };
@@ -233,19 +282,13 @@ export function DiagramNode({ id, data, selected }: NodeProps<FlowNode>) {
         drag.sx === -1 ? Math.round(drag.atX + (drag.startW - w)) : drag.atX;
       const py =
         drag.sy === -1 ? Math.round(drag.atY + (drag.startH - h)) : drag.atY;
+      drag.px = px;
+      drag.py = py;
       drag.w = w;
       drag.h = h;
-      setNodes((nodes) =>
-        nodes.map((n) =>
-          n.id === id
-            ? {
-                ...n,
-                position: { x: px, y: py },
-                data: { ...n.data, width: w, height: h },
-              }
-            : n,
-        ),
-      );
+      // One rAF-coalesced internal-store write per animation frame instead of
+      // a synchronous one per pointer event — see flushResize/scheduleResize.
+      scheduleResize();
     };
 
     const up = () => {

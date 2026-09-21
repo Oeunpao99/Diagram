@@ -98,6 +98,10 @@ class DiagramMessage(Base, UUIDMixin, TimestampMixin):
     )
     role: Mapped[str] = mapped_column(String(10), nullable=False)  # "user" | "ai"
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # The sketch a user attached when describing a diagram, as a data URL —
+    # kept with the message so the restored thread shows their own bubble the
+    # way it looked live. Mirrors the frontend's ChatMessage.image.
+    image: Mapped[str | None] = mapped_column(Text, nullable=True)
     # A finished edit's changelog / couldn't-do-it list — see Copilot.tsx's
     # own Msg type, which this mirrors so a restored message renders exactly
     # like it did live (a checklist card, not plain text).

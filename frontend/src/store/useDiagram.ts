@@ -280,6 +280,7 @@ function queuePersistMessage(diagramId: string, msg: ChatMessage) {
       api.addMessage(diagramId, {
         role: msg.role,
         text: msg.text,
+        image: msg.image ?? null,
         changes: msg.changes,
         warnings: msg.warnings,
       }),

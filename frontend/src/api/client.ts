@@ -337,7 +337,7 @@ export const api = {
 
   addMessage: (
     diagramId: string,
-    message: { role: "user" | "ai"; text: string; changes?: string[]; warnings?: string[] },
+    message: { role: "user" | "ai"; text: string; image?: string | null; changes?: string[]; warnings?: string[] },
   ) => post<ChatMessage>(`/diagrams/${diagramId}/messages`, message),
 
   clearMessages: (diagramId: string) => del(`/diagrams/${diagramId}/messages`),

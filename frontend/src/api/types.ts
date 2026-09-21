@@ -335,6 +335,10 @@ export interface ChatMessage {
   id: string;
   role: "user" | "ai";
   text: string;
+  /** The image a user attached when describing a sketch — kept alongside
+   *  the message so their own bubble can show what they sent, and a restored
+   *  thread renders it exactly like it did live. A data URL string. */
+  image?: string | null;
   changes?: string[];
   warnings?: string[];
   created_at: string;

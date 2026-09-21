@@ -472,10 +472,12 @@ class VersionOut(BaseModel):
 class DiagramMessageCreate(BaseModel):
     """One line of the Copilot chat, as the frontend already has it the
     moment it's shown — `changes`/`warnings` mirror the finished-edit
-    checklist card so a restored message renders the same way live."""
+    checklist card so a restored message renders the same way live, and
+    `image` carries the sketch a user attached when describing a diagram."""
 
     role: Literal["user", "ai"]
     text: str
+    image: str | None = None
     changes: list[str] | None = None
     warnings: list[str] | None = None
 
@@ -486,6 +488,7 @@ class DiagramMessageOut(BaseModel):
     id: uuid.UUID
     role: Literal["user", "ai"]
     text: str
+    image: str | None
     changes: list[str] | None
     warnings: list[str] | None
     created_at: datetime

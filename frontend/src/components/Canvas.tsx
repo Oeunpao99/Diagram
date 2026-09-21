@@ -1030,10 +1030,52 @@ export function Canvas() {
         .filter((g) => g.id !== groupId && isInside(doc, g.id, groupId))
         .map((g) => `group__${g.id}`);
       dragRiders.current = new Set([...members, ...boxes]);
-      dragStart.current = new Map(nodes.map((n) => [n.id, n.position]));
+      // Read start positions from React Flow's own store rather than the
+      // closed-over controlled `nodes` state: getNodes() is exactly the set of
+      // elements being dragged right now (group boxes included), and it keeps
+      // this callback — and every child callback that depends on it — stable
+      // across renders. A fresh handler identity on every render while
+      // dragging is what used to pin the classic "Maximum update depth
+      // exceeded" crash when riding sibling nodes along.
+      dragStart.current = new Map(getNodes().map((n) => [n.id, n.position]));
     },
-    [nodes],
+    [getNodes],
   );
+
+  // Rider positions aren't written on every pointer event. Each pointermove
+  // only records the latest delta, and one requestAnimationFrame flush applies
+  // it to the controlled `nodes`. Writing synchronously inside the gesture was
+  // re-entering React Flow's own store while it was mid-drag-update (each
+  // write notifies every internal subscriber in the same tick), which is the
+  // same nested-update loop the resize used to trip over. Frame-coalescing
+  // keeps the group gliding at the same 60fps with none of the re-entrancy.
+  const riderFrame = useRef<number | null>(null);
+  const riderDelta = useRef<{ dx: number; dy: number } | null>(null);
+
+  const flushRiders = useCallback(() => {
+    riderFrame.current = null;
+    const delta = riderDelta.current;
+    riderDelta.current = null;
+    if (!delta) return;
+    const starts = dragStart.current;
+    if (!starts) return;
+    const { dx, dy } = delta;
+    setNodes((current) => {
+      let moved = false;
+      const next = current.map((n) => {
+        if (!dragRiders.current.has(n.id)) return n;
+        const start = starts.get(n.id);
+        if (!start) return n;
+        const shifted = { ...n, position: { x: start.x + dx, y: start.y + dy } };
+        if (shifted.position.x === n.position.x && shifted.position.y === n.position.y) {
+          return n; // already there — keep the reference, nothing to re-render
+        }
+        moved = true;
+        return shifted;
+      });
+      return moved ? next : current;
+    });
+  }, [setNodes]);
 
   const onNodeDrag = useCallback(
     (_event: unknown, node: FlowNode) => {
@@ -1041,25 +1083,23 @@ export function Canvas() {
       if (!draggedGroupId(node) || !starts) return;
       const from = starts.get(node.id);
       if (!from) return;
-      const dx = node.position.x - from.x;
-      const dy = node.position.y - from.y;
-
-      setNodes((current) =>
-        current.map((n) => {
-          if (n.id === node.id || !dragRiders.current.has(n.id)) return n;
-          const start = starts.get(n.id);
-          if (!start) return n;
-          return { ...n, position: { x: start.x + dx, y: start.y + dy } };
-        }),
-      );
+      riderDelta.current = { dx: node.position.x - from.x, dy: node.position.y - from.y };
+      if (riderFrame.current === null) {
+        riderFrame.current = requestAnimationFrame(flushRiders);
+      }
     },
-    [setNodes],
+    [flushRiders],
   );
 
   const onNodeDragStopWithGroup = useCallback(
     (_event: unknown, node: FlowNode) => {
       const groupId = draggedGroupId(node);
       const starts = dragStart.current;
+      if (riderFrame.current !== null) {
+        cancelAnimationFrame(riderFrame.current);
+        riderFrame.current = null;
+      }
+      riderDelta.current = null;
       dragStart.current = null;
       dragRiders.current = new Set();
 

@@ -31,7 +31,14 @@ async def test_add_and_list_messages_round_trip(db):
     user, diagram = await _make_user_and_diagram(db)
     try:
         await add_message(
-            diagram.id, DiagramMessageCreate(role="user", text="Add a rejection path"), user, db
+            diagram.id,
+            DiagramMessageCreate(
+                role="user",
+                text="Build this from the sketch",
+                image="data:image/png;base64,c2tldGNo",
+            ),
+            user,
+            db,
         )
         await add_message(
             diagram.id,
@@ -41,7 +48,8 @@ async def test_add_and_list_messages_round_trip(db):
         )
         out = await list_messages(diagram.id, user, db)
         assert [m.role for m in out] == ["user", "ai"]
-        assert out[0].text == "Add a rejection path"
+        assert out[0].text == "Build this from the sketch"
+        assert out[0].image == "data:image/png;base64,c2tldGNo"
         assert out[1].changes == ["Added X"]
         # Oldest first — the order a restored conversation should replay in.
         assert out[0].created_at <= out[1].created_at

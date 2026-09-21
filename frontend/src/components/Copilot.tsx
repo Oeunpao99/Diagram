@@ -193,10 +193,17 @@ export function Copilot() {
   };
 
   /** No diagram yet, but a sketch instead of (or alongside) typed text —
-   *  same Describe step, just read from a picture. */
+   *  same Describe step, just read from a picture. The image rides along on
+   *  the user's own message so their bubble shows what they sent, and it's
+   *  persisted with the thread (see appendMessage) so a restored chat renders
+   *  it the same way it did live. */
   const sendImage = (image: { dataUrl: string; name: string }, caption: string) => {
     if (busy !== null) return;
-    appendMessage({ role: "user", text: caption.trim() || `Attached ${image.name}` });
+    appendMessage({
+      role: "user",
+      text: caption.trim() || `Attached ${image.name}`,
+      image: image.dataUrl,
+    });
     dismissImproved();
     setShowImproved(false);
     void analyzeImage(image.dataUrl, caption);
@@ -438,7 +445,21 @@ export function Copilot() {
               ) : message.role === "ai" ? (
                 <Markdown>{message.text}</Markdown>
               ) : (
-                message.text
+                // The image the user attached rides on their own message, so
+                // the thread shows what they sent next to the words (and the
+                // same bubble when the chat is restored). Standalone block
+                // above the text, width-capped so a full-page sketch can't
+                // blow the thread out; `object-contain` keeps it whole.
+                <>
+                  {message.image && (
+                    <img
+                      src={message.image}
+                      alt="Attached sketch"
+                      className="mb-1.5 block max-h-[220px] w-auto max-w-full rounded-[7px] border border-[rgba(255,255,255,0.35)] bg-surface object-contain"
+                    />
+                  )}
+                  {message.text}
+                </>
               )}
             </div>
           </div>
