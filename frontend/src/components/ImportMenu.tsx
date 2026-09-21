@@ -97,7 +97,7 @@ export function ImportMenu() {
         }}
       />
       {open && (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[240px] rounded-xl border border-line bg-surface p-[5px] shadow-3 animate-[menu-in_130ms_ease]" role="menu">
+        <div className="absolute right-0 top-[calc(100%+6px)] z-50 min-w-[300px] rounded-xl border border-line bg-surface p-[5px] shadow-3 animate-[menu-in_130ms_ease]" role="menu">
           {mode === "menu" ? (
             <>
               <div className="px-2.5 pb-[5px] pt-1.5 text-[10.5px] font-[650] uppercase tracking-[0.06em] text-slate-soft">
@@ -131,8 +131,8 @@ export function ImportMenu() {
               </div>
               <textarea
                 autoFocus
-                className="h-[140px] w-full resize-none rounded-[7px] border border-line bg-paper p-2 font-mono text-[11.5px] text-ink outline-none focus:border-green"
-                placeholder={"graph LR\n  A[Start] --> B[Do the thing]"}
+                className="h-[240px] w-full resize-y rounded-[7px] border border-line bg-paper p-2 font-mono text-[11.5px] text-ink outline-none focus:border-green"
+                placeholder={"graph LR\n  A[Start] --> B[Do the thing]\n\nsequenceDiagram\n  HR->>NH: Send offer & paperwork\n  IT-->>NH: Deliver laptop & credentials"}
                 value={pasted}
                 onChange={(event) => setPasted(event.target.value)}
               />

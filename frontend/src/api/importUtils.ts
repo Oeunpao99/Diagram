@@ -82,7 +82,99 @@ function parseEdgeLine(
 
 const SKIP_LINE = /^\s*(%%|subgraph\b|end\s*$|class(Def)?\b|click\b|style\b|linkStyle\b)/i;
 
+/** Mermaid sequenceDiagram — the `participant`/`actor` rows become actor
+ *  nodes and every message a labelled edge between them (solid for `->`,
+ *  dashed for `-->`, exactly as Mermaid reads the line). Block and annotation
+ *  syntax (`loop`/`alt`/`opt`/`note`/`activate`) has no node/edge meaning
+ *  here, so it's skipped; the caller auto-lays the actors out left-to-right
+ *  afterward, so the file arrives without positional data — same contract as
+ *  parseMermaid. */
+export function parseSequenceDiagram(text: string): DiagramDoc {
+  // `HR->>NH : Send offer` — source, an arrow (`-` solid, `--`/`-..-`
+  // dashed), target, then an optional `: label`. Ids are plain Mermaid ids;
+  // block syntax (loop/alt/note/...) never reaches this regex.
+  const SEQ_ARROW =
+    /^\s*([A-Za-z0-9_]+)\s*(<?)\s*(-{1,2}|-\.+-|==+)\s*(>+|x|o|\))\s*([A-Za-z0-9_]+)\s*(?::\s*(.*?)\s*)?$/;
+  const SEQ_PARTICIPANT =
+    /^\s*(?:participant|actor)\s+([A-Za-z0-9_]+)(?:\s+as\s+(.+?))?\s*$/;
+  const SEQ_SKIP =
+    /^\s*(?:sequenceDiagram|autonumber|note\b|loop\b|alt\b|else\b|opt\b|par\b|break\b|critical\b|rect\b|edge\b|and\b|activate\b|deactivate\b|title\b)/i;
+
+  const participants = new Map<string, string>();
+  const order: string[] = [];
+  const edges: {
+    id: string;
+    source: string;
+    target: string;
+    label: string | null;
+    style: "solid" | "dashed";
+  }[] = [];
+
+  const ensureParticipant = (id: string, label: string | null) => {
+    if (!participants.has(id)) {
+      participants.set(id, unescapeLabel(label ?? id) || id);
+      order.push(id);
+    }
+  };
+
+  let edgeIndex = 0;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || SKIP_LINE.test(line) || SEQ_SKIP.test(line)) continue;
+
+    const participant = line.match(SEQ_PARTICIPANT);
+    if (participant && participant[1]) {
+      ensureParticipant(participant[1], participant[2]);
+      continue;
+    }
+
+    const arrow = line.match(SEQ_ARROW);
+    if (!arrow) continue;
+    const [, source, , dashes, , target, label] = arrow;
+    ensureParticipant(source, null);
+    ensureParticipant(target, null);
+    edgeIndex += 1;
+    edges.push({
+      id: `e_import_${edgeIndex}`,
+      source,
+      target,
+      label: label ? unescapeLabel(label) : null,
+      style: /^-{2,}|-\.+-/.test(dashes) ? "dashed" : "solid",
+    });
+  }
+
+  if (order.length === 0) {
+    throw new ImportError(
+      "No sequence participants found — expecting Mermaid `sequenceDiagram` syntax.",
+    );
+  }
+
+  return normalizeDoc({
+    title: "Imported sequence diagram",
+    diagram_type: "sequence",
+    direction: "LR",
+    nodes: order.map((id) => ({
+      id,
+      label: participants.get(id) ?? id,
+      kind: "actor",
+      position: { x: 0, y: 0 },
+      size: { width: 180, height: 64 },
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label: e.label,
+      style: e.style,
+      bidirectional: false,
+    })),
+    lanes: [],
+  });
+}
+
 /** Parses a Mermaid flowchart (`graph`/`flowchart` block) into a DiagramDoc.
+ *  Sequence diagrams are handled by parseSequenceDiagram instead, and routed
+ *  there before this runs.
  *  Deliberately modest — pipe-style edge labels (`-->|text|`, the syntax
  *  this app's own toMermaid export writes) rather than every historical
  *  Mermaid label dialect, and no attempt to rebuild swimlanes from
@@ -191,6 +283,11 @@ export async function importDiagramFile(
   const text = await file.text();
   const name = file.name.toLowerCase();
 
+  const isSequence = /^\s*sequenceDiagram\b/im.test(text);
+  if (isSequence) {
+    return { doc: parseSequenceDiagram(text), needsLayout: true };
+  }
+
   const looksLikeMermaid = MERMAID_EXTENSIONS.some((ext) => name.endsWith(ext)) || /^\s*(graph|flowchart)\s+/im.test(text);
   if (name.endsWith(".json") || (!looksLikeMermaid && text.trim().startsWith("{"))) {
     return { doc: parseDiagramJson(text), needsLayout: false };
@@ -199,11 +296,15 @@ export async function importDiagramFile(
 }
 
 /** Same as importDiagramFile, for text pasted directly rather than picked
- *  from disk (JSON or Mermaid both auto-detected the same way). */
+ *  from disk (JSON or Mermaid flowcharts/sequences both auto-detected the
+ *  same way). */
 export function importDiagramText(text: string): { doc: DiagramDoc; needsLayout: boolean } {
   const trimmed = text.trim();
   if (trimmed.startsWith("{")) {
     return { doc: parseDiagramJson(trimmed), needsLayout: false };
+  }
+  if (/^\s*sequenceDiagram\b/im.test(trimmed)) {
+    return { doc: parseSequenceDiagram(trimmed), needsLayout: true };
   }
   return { doc: parseMermaid(trimmed), needsLayout: true };
 }
