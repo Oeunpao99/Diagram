@@ -350,19 +350,29 @@ export function Copilot() {
                 twice over) sweeps the text in left-to-right, the same
                 "still arriving" feel a live token stream has, even though
                 this whole answer actually landed in one response. */}
-            <div
-              className={`min-w-0 text-[11.5px] leading-[1.5] ${
-                message.role === "user"
-                  ? "max-w-[78%] whitespace-pre-wrap rounded-[11px] rounded-br-[4px] bg-green px-[11px] py-[9px] text-on-accent"
-                  : // Capped the same 78% as the user's own bubble above — a
-                    // long reply used to be free to run all the way to the
-                    // row's true right edge (past where a short user message
-                    // like "hello" ever reaches), which read as lopsided.
-                    // Both sides now share one right boundary.
-                    `chat-markdown max-w-[78%] py-[5px] text-ink${message.changes?.length ? "" : " chat-stream"}`
-              }`}
-            >
-              {message.role === "ai" && message.changes?.length ? (
+            {message.role === "user" ? (
+              <div className="flex min-w-0 max-w-[78%] flex-col items-end gap-1.5">
+                {/* The image stands on its own above the bubble, separate
+                    from the text frame — what you sent reads as its own
+                    thing rather than a picture plugged into the chat line.
+                    Width-capped so a full-page sketch can't blow the thread
+                    out; `object-contain` keeps it whole. */}
+                {message.image && (
+                  <img
+                    src={message.image}
+                    alt="Attached sketch"
+                    className="block max-h-[220px] w-auto max-w-full rounded-[11px] border border-line bg-surface object-contain"
+                  />
+                )}
+                <div className="max-w-full whitespace-pre-wrap rounded-[11px] rounded-br-[4px] bg-green px-[11px] py-[9px] text-[11.5px] leading-[1.5] text-on-accent">
+                  {message.text}
+                </div>
+              </div>
+            ) : (
+              <div
+                className={`chat-markdown min-w-0 max-w-[78%] py-[5px] text-[11.5px] leading-[1.5] text-ink${message.changes?.length ? "" : " chat-stream"}`}
+              >
+                {message.changes?.length ? (
                 // A finished edit: the summary sentence up top, then the real
                 // changelog as a card — the same treatment `improved`'s own
                 // "Structured analysis" card already uses below, so a change
@@ -442,26 +452,11 @@ export function Copilot() {
                     ) : null}
                   </div>
                 </div>
-              ) : message.role === "ai" ? (
-                <Markdown>{message.text}</Markdown>
               ) : (
-                // The image the user attached rides on their own message, so
-                // the thread shows what they sent next to the words (and the
-                // same bubble when the chat is restored). Standalone block
-                // above the text, width-capped so a full-page sketch can't
-                // blow the thread out; `object-contain` keeps it whole.
-                <>
-                  {message.image && (
-                    <img
-                      src={message.image}
-                      alt="Attached sketch"
-                      className="mb-1.5 block max-h-[220px] w-auto max-w-full rounded-[7px] border border-[rgba(255,255,255,0.35)] bg-surface object-contain"
-                    />
-                  )}
-                  {message.text}
-                </>
+                <Markdown>{message.text}</Markdown>
               )}
-            </div>
+              </div>
+            )}
           </div>
         ))}
 

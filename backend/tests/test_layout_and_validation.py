@@ -146,6 +146,54 @@ class TestLayout:
         # router would have picked, not silently paired up to match.
         assert edge.source_handle is None
 
+    def test_hub_fan_no_longer_fuses_lines(self):
+        """A hub that fans out to a whole layer used to push every line out
+        through the same right-side port at the same height, so the strokes
+        rode the exact same runway and fused into one unreadable line. The
+        reroute's edge-edge awareness should give one of the pair its own
+        top/bottom lane instead, so the two paths never overlap — and it must
+        never make a line cross a shape to do it."""
+        from app.layout.engine import _corridor, _edge_conflict, _segments
+
+        doc = doc_from(
+            nodes=[
+                {"id": "a", "label": "Hub", "kind": "start"},
+                {"id": "b", "label": "Branch one", "kind": "process"},
+                {"id": "c", "label": "Branch two", "kind": "process"},
+            ],
+            edges=[
+                {"id": "e1", "source": "a", "target": "b"},
+                {"id": "e2", "source": "a", "target": "c"},
+            ],
+        )
+        result = apply_layout(doc, Direction.LR)
+        by_id = {e.id: e for e in result.edges}
+        placed = {n.id: n for n in result.nodes}
+        # Premise: b and c are siblings in the same layer, stacked level with
+        # each other — the situation that used to fuse.
+        assert placed["b"].position.y != placed["c"].position.y
+        assert placed["b"].position.x == placed["c"].position.x
+
+        # Exactly one of the two takes the separate top/bottom lane; the other
+        # stays on the tidy default runway. Both on one (or both on default)
+        # is precisely the fused mess the reroute exists to prevent.
+        routed = [
+            e
+            for e in (by_id["e1"], by_id["e2"])
+            if e.source_handle == "b" and e.target_handle == "t"
+        ]
+        assert len(routed) == 1
+        untouched = [e for e in (by_id["e1"], by_id["e2"]) if e not in routed]
+        assert untouched[0].source_handle is None and untouched[0].target_handle is None
+
+        # And neither drawn path actually overlaps the other, nor slices a node.
+        polylines = [_corridor(placed[e.source], placed[e.target], e.source_handle, e.target_handle) for e in result.edges]
+        conflict = 0
+        for A in _segments(polylines[0]):
+            for B in _segments(polylines[1]):
+                conflict += _edge_conflict(A, B)
+        assert conflict == 0
+
     def test_fit_to_box_keeps_flow_left_to_right(self):
         doc = apply_layout(SIMPLE.model_copy(deep=True), Direction.LR, "layered", 900, 600)
         x = {n.id: n.position.x for n in doc.nodes}

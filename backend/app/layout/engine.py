@@ -345,38 +345,125 @@ def _crossings(points, nodes: list[Node], skip: set[str]) -> int:
     return hits
 
 
+def _segments(points: list[tuple[float, float]]):
+    """Every axis-aligned run of the polyline, as
+    `(lo, hi, lo, hi, vertical)` — `lo`..`hi` are the segment's extent along
+    each axis, `vertical` marks which axis is fixed."""
+    out = []
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        out.append((min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1), x0 == x1))
+    return out
+
+
+def _edge_conflict(a: tuple, b: tuple) -> int:
+    """How badly two segments run into each other: 0 clear, 1 a perpendicular
+    crossing (with the shared point interior to both runs, so a mere corner
+    touch doesn't count — an X of lines reads far worse than a T), 2 the lines
+    ride the same axis-aligned runway and overlap (fused into one line)."""
+    if a[4] == b[4]:
+        if a[4]:
+            if a[0] != b[0]:
+                return 0
+            return 2 if max(a[2], b[2]) < min(a[3], b[3]) else 0
+        if a[2] != b[2]:
+            return 0
+        return 2 if max(a[0], b[0]) < min(a[1], b[1]) else 0
+    v, h = (a, b) if a[4] else (b, a)
+    if v[0] > h[0] and v[0] < h[1] and h[2] > v[2] and h[2] < v[3]:
+        return 1
+    return 0
+
+
 def _reroute_crossing_edges(doc: DiagramDoc) -> None:
     """Last pass, once every node has its final position: move an edge off
-    the default ports when the line that draws would run over nodes it has
-    nothing to do with.
+    the default ports when the line that draws would be tangled.
 
     `_route_edges` already catches the cases predictable from layer distance
-    alone, but it has to run *before* placement, so it can't see the one that
-    actually dominates a busy swimlane: two nodes sharing a layer *and* a
-    lane sit side by side on the flow axis at the same cross position, so any
-    edge passing that lane at that height is drawn straight through whichever
-    of them sits in between. Only real coordinates show that.
+    alone, but it has to run *before* placement, so it can't see the ones that
+    actually dominate: two nodes sharing a layer *and* a lane sit side by side
+    on the flow axis at the same cross position, so any edge passing that lane
+    at that height is drawn straight through whichever of them sits in between
+    — and an edge that shares its runway with siblings (a hub that fans out to
+    a whole row leaves every line through the same right-side port) is drawn
+    *on top of it*, fused into one unreadable stroke. Only real coordinates
+    show either.
 
-    Switches only when the top/bottom pair is genuinely better — on a dense
-    diagram the alternative route can be just as blocked, and a lateral move
-    that doesn't help isn't worth undoing the tidy left-to-right default for.
-    Handles chosen by hand are left alone, same as everywhere else.
+    So each free edge chooses between the tidy left-to-right default and the
+    top/bottom pair that gets its own lane, judged on what the drawn polyline
+    would actually run into:
+
+    * node boxes first — an arrow slicing clean through a shape is far worse
+      than crossing a couple of lines, and one node hit is weighted higher
+      than the whole rest of the ledger put together, so a reroute that costs
+      a shape-slice is never taken,
+    * then every other edge it would cross or fuse with (two runs sharing a
+      stretch cost as much as an X — a fused line reads just as tangled).
+
+    The optimum isn't picked edge-by-edge (that just herds a poor edge onto a
+    lane its sibling already claimed) but as the whole figure: keep taking the
+    single flip that most reduces the overall cost until nothing helps, so the
+    crowding sorts itself out. Handles chosen by hand are left alone, same as
+    everywhere else.
     """
-    for edge in doc.edges:
-        if edge.source_handle is not None or edge.target_handle is not None:
-            continue
-        source = next((n for n in doc.nodes if n.id == edge.source), None)
-        target = next((n for n in doc.nodes if n.id == edge.target), None)
-        if source is None or target is None:
-            continue
+    by_id = {n.id: n for n in doc.nodes}
+    free = [
+        e
+        for e in doc.edges
+        if e.source_handle is None
+        and e.target_handle is None
+        and e.source in by_id
+        and e.target in by_id
+    ]
+    if not free:
+        return
 
-        skip = {edge.source, edge.target}
-        blocked = _crossings(_corridor(source, target, None, None), doc.nodes, skip)
-        if not blocked:
-            continue
-        if _crossings(_corridor(source, target, "b", "t"), doc.nodes, skip) < blocked:
-            edge.source_handle = "b"
-            edge.target_handle = "t"
+    def polyline(e):
+        return _corridor(by_id[e.source], by_id[e.target], e.source_handle, e.target_handle)
+
+    # One node sliced clean through outweighs any web of line crossings.
+    NODE_OVERLAP_COST = 100
+
+    def total_cost() -> int:
+        cost = 0
+        polylines = []
+        for e in free:
+            cost += NODE_OVERLAP_COST * _crossings(polyline(e), doc.nodes, {e.source, e.target})
+            polylines.append(polyline(e))
+        for i, a in enumerate(polylines):
+            for b in polylines[i + 1 :]:
+                for A in _segments(a):
+                    for B in _segments(b):
+                        cost += _edge_conflict(A, B)
+        return cost
+
+    current = total_cost()
+    while True:
+        best_edge = None
+        best_cost = current
+        for e in free:
+            # Flip it and measure the whole figure, then put it back unless
+            # the flip was (kept) the best single move found.
+            flip = e.source_handle is None
+            if flip:
+                e.source_handle, e.target_handle = "b", "t"
+            else:
+                e.source_handle, e.target_handle = None, None
+            cost = total_cost()
+            if cost < best_cost:
+                best_cost = cost
+                best_edge = e
+            if flip:
+                e.source_handle, e.target_handle = None, None
+            else:
+                e.source_handle, e.target_handle = "b", "t"
+        if best_edge is None or best_cost >= current:
+            break
+        flip = best_edge.source_handle is None
+        if flip:
+            best_edge.source_handle, best_edge.target_handle = "b", "t"
+        else:
+            best_edge.source_handle, best_edge.target_handle = None, None
+        current = best_cost
 
 
 def _place_layered(
