@@ -151,7 +151,14 @@ function routePoints(
   const [sx, sy] = OUTWARD[srcSide];
   const [tx, ty] = OUTWARD[tgtSide];
   const exit: [number, number] = [srcX + sx * STANDOFF, srcY + sy * STANDOFF];
-  const enter: [number, number] = [tgtX - tx * STANDOFF, tgtY - ty * STANDOFF];
+  // Same idea as `exit`, mirrored: step *outward* from the target's port
+  // too, so the run approaches from outside the box and turns in cleanly.
+  // Subtracting here (the target's outward vector points the other way already)
+  // lands the standoff point *inside* the box instead — the last segment then
+  // ran from inside back out through the border, which is why the arrowhead
+  // (auto-oriented on the path's final tangent) showed up backwards, jammed
+  // into the node's edge instead of approaching it from outside.
+  const enter: [number, number] = [tgtX + tx * STANDOFF, tgtY + ty * STANDOFF];
 
   const horizontal = srcSide === Position.Right || srcSide === Position.Left ||
     tgtSide === Position.Right || tgtSide === Position.Left;
