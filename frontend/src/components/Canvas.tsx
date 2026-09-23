@@ -43,6 +43,7 @@ import { ASSET_LIBRARY } from "./assetLibrary";
 import { AssetsDock } from "./AssetsDock";
 import { CanvasToolbar, type Tool } from "./CanvasToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
+import { FlowEdge } from "./FlowEdge";
 import { ICON_CATALOG } from "./iconCatalog";
 import { nodeTypes } from "./nodes";
 import { RehearsalOverlay } from "./RehearsalOverlay";
@@ -1287,6 +1288,7 @@ export function Canvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={{ smoothstep: FlowEdge }}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={onNodeDragStart}

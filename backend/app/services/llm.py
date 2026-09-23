@@ -32,6 +32,12 @@ def client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             api_key=settings.azure_openai_api_key,
             base_url=settings.azure_openai_endpoint,
+            # The SDK's own defaults are 600s and two retries, so a wedged
+            # call can hold a request open for half an hour with the caller's
+            # UI spinning on it. A stuck call is worth surfacing as an error
+            # long before that; one retry still covers a transient blip.
+            timeout=120.0,
+            max_retries=1,
         )
     return _client
 

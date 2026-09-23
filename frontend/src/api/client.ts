@@ -106,12 +106,34 @@ async function guard(response: Response) {
   }
 }
 
-async function post<T>(path: string, body: unknown, method = "POST"): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(),
-    body: JSON.stringify(body),
+/** Nothing on the wire guarantees a reply ever comes — a body the proxy
+ *  refuses mid-upload, or a connection that stalls, leaves `fetch` pending
+ *  indefinitely, and every caller here parks its spinner on that promise.
+ *  A deadline turns "the panel spinning forever" into a dismissable error.
+ *  Generous, because the AI routes really do run for a minute or two. */
+const REQUEST_TIMEOUT_MS = 180_000;
+
+/** `AbortSignal.timeout` aborts with a DOMException whose message is about
+ *  signals, not about what the user did — swap in something a person can
+ *  act on. */
+function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  return run(AbortSignal.timeout(REQUEST_TIMEOUT_MS)).catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError("That took too long and was cancelled — try again.", 0);
+    }
+    throw error;
   });
+}
+
+async function post<T>(path: string, body: unknown, method = "POST"): Promise<T> {
+  const response = await withTimeout((signal) =>
+    fetch(`${BASE}${path}`, {
+      method,
+      headers: headers(),
+      body: JSON.stringify(body),
+      signal,
+    }),
+  );
   if (!response.ok) {
     await guard(response);
     const detail = await response.text();

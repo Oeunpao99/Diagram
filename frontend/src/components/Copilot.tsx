@@ -23,6 +23,60 @@ import { timeAgo } from "./templateVisuals";
 
 const MAX_IMAGE_BYTES = 6_000_000; // ~6MB — matches the backend's data-url cap with room to spare
 
+/** Longest edge we re-encode a picked image down to. A whiteboard photo at
+ *  this size still has every label legible to the vision model — the extra
+ *  pixels a phone camera hands over buy nothing and cost upload time. */
+const MAX_IMAGE_EDGE = 1600;
+
+/** Data-url length we aim to land under. The image is posted as base64
+ *  inside the JSON body, so it arrives ~33% bigger than the file, and it has
+ *  to clear whatever body cap sits in front of the API (see nginx.conf) as
+ *  well as the backend's own. Anything comfortably below this is invisible
+ *  to both. */
+const MAX_UPLOAD_CHARS = 2_000_000;
+
+/** Read a picked file into the data URL we post, shrinking it on the way.
+ *
+ *  Sending the camera's original was the bug behind "Looking at your image…"
+ *  hanging forever: a few-megabyte photo becomes a multi-megabyte JSON body,
+ *  which the proxy in front of the API refuses outright — so the request
+ *  never reached the model and the panel sat spinning on a promise that
+ *  never settled. Re-encoding to a bounded JPEG keeps a sketch perfectly
+ *  readable at a few hundred KB.
+ *
+ *  If the browser can't decode the file we hand back the original bytes
+ *  rather than failing — the server is the better judge of what it can read. */
+function readImageForUpload(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onload = () => {
+      const original = String(reader.result);
+      const image = new Image();
+      image.onerror = () => resolve(original);
+      image.onload = () => {
+        const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.width, image.height));
+        // Already small in both senses — re-encoding would only lose detail.
+        if (scale === 1 && original.length <= MAX_UPLOAD_CHARS) return resolve(original);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(original);
+        // JPEG has no alpha channel, so a transparent-background screenshot
+        // would come out as ink on black without this.
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      image.src = original;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 /** Ideas to prime an empty canvas — real prompts a user could actually send.
  *  Kept short: one business-process example, one technical one, enough to
  *  show the range without turning into a wall of chips. Clicking one sends
@@ -244,10 +298,9 @@ export function Copilot() {
       setAttachError("That image is too large — try one under 6MB.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => setAttachedImage({ dataUrl: String(reader.result), name: file.name });
-    reader.onerror = () => setAttachError("Couldn't read that file.");
-    reader.readAsDataURL(file);
+    void readImageForUpload(file)
+      .then((dataUrl) => setAttachedImage({ dataUrl, name: file.name }))
+      .catch(() => setAttachError("Couldn't read that file."));
   };
 
   const working: "improving" | "generating" | "analyzing" | null =
