@@ -40,19 +40,6 @@ class OAuthCodeRequest(BaseModel):
     redirect_uri: str
 
 
-class TelegramAuthRequest(BaseModel):
-    """The Login Widget's callback payload, forwarded as-is — every field
-    here (plus `hash`) is part of what gets HMAC-verified server-side."""
-
-    id: int
-    first_name: str
-    last_name: str | None = None
-    username: str | None = None
-    photo_url: str | None = None
-    auth_date: int
-    hash: str
-
-
 class UserOut(BaseModel):
     id: uuid.UUID
     email: EmailStr | None

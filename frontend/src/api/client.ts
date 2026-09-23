@@ -14,7 +14,6 @@ import type {
   ImprovedPrompt,
   Project,
   RouteResult,
-  TelegramAuthPayload,
   Template,
   Theme,
   TokenResponse,
@@ -390,8 +389,6 @@ export const api = {
 
   loginGithub: (code: string, redirectUri: string) =>
     post<TokenResponse>("/auth/github", { code, redirect_uri: redirectUri }),
-
-  loginTelegram: (payload: TelegramAuthPayload) => post<TokenResponse>("/auth/telegram", payload),
 
   me: () => get<User>("/auth/me"),
 

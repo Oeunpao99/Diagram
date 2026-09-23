@@ -21,11 +21,11 @@ class User(Base, UUIDMixin, TimestampMixin):
         ),
     )
 
-    # Nullable: a Telegram sign-in never supplies an email at all.
+    # Nullable: a provider sign-in may never supply an email at all.
     email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    # Nullable: an account created via Google/GitHub/Telegram has no password
-    # until (if ever) the user sets one — see the guard in auth.py's login().
+    # Nullable: an account created via Google/GitHub has no password until
+    # (if ever) the user sets one — see the guard in auth.py's login().
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

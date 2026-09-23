@@ -1,70 +1,12 @@
-"""verify_telegram_payload's HMAC check, and upsert_oauth_user's account
-resolution/linking policy — the two places a mistake here means either
-rejecting a legitimate sign-in, or worse, accepting a forged one or attaching
-an identity to the wrong local account.
+"""upsert_oauth_user's account resolution/linking policy — the place a
+mistake here means either accepting a forged identity or attaching one to
+the wrong local account.
 """
 
-import hashlib
-import hmac
-import time
 import uuid
 
-import pytest
-
-from app.core.config import settings
 from app.models import User
-from app.schemas.auth import TelegramAuthRequest
 from app.services import oauth
-
-
-def _signed_payload(**overrides) -> TelegramAuthRequest:
-    fields = {
-        "id": 987654321,
-        "first_name": "Ada",
-        "last_name": None,
-        "username": "ada_tg",
-        "photo_url": None,
-        "auth_date": int(time.time()),
-    }
-    fields.update(overrides)
-    check_string = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()) if v is not None)
-    secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
-    signature = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-    return TelegramAuthRequest(**fields, hash=signature)
-
-
-@pytest.fixture(autouse=True)
-def _telegram_bot_token(monkeypatch):
-    monkeypatch.setattr(settings, "telegram_bot_token", "test-bot-token-000")
-
-
-def test_verify_telegram_payload_accepts_a_correctly_signed_payload():
-    profile = oauth.verify_telegram_payload(_signed_payload())
-    assert profile.provider == "telegram"
-    assert profile.provider_id == "987654321"
-    assert profile.email is None
-    assert profile.name == "Ada"
-
-
-def test_verify_telegram_payload_rejects_a_tampered_field():
-    tampered = _signed_payload().model_copy(update={"first_name": "Eve"})
-    with pytest.raises(oauth.OAuthError):
-        oauth.verify_telegram_payload(tampered)
-
-
-def test_verify_telegram_payload_rejects_a_stale_auth_date():
-    stale = _signed_payload(auth_date=int(time.time()) - 90_000)  # > 24h
-    with pytest.raises(oauth.OAuthError):
-        oauth.verify_telegram_payload(stale)
-
-
-def test_verify_telegram_payload_requires_a_configured_bot_token(monkeypatch):
-    # Signed while a token is still configured — the point is that *checking*
-    # it must refuse to run with none set, not that signing would fail too.
-    payload = _signed_payload()
-    monkeypatch.setattr(settings, "telegram_bot_token", None)
-    with pytest.raises(oauth.OAuthError):
-        oauth.verify_telegram_payload(payload)
 
 
 async def test_upsert_oauth_user_creates_a_new_account(db):

@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     github_client_id: str | None = None
     github_client_secret: str | None = None
-    # sha256(this) is the HMAC key Telegram signs widget payloads with — never
-    # sent to the frontend, unlike the client ids above.
-    telegram_bot_token: str | None = None
 
     @property
     def fast_deployment(self) -> str:

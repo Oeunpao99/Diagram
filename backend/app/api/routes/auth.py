@@ -20,7 +20,6 @@ from app.schemas.auth import (
     LoginRequest,
     OAuthCodeRequest,
     RegisterRequest,
-    TelegramAuthRequest,
     TokenResponse,
     UpdateSettingsRequest,
     UserOut,
@@ -65,15 +64,15 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     ).scalar_one_or_none()
 
     # Same message either way: don't help anyone enumerate registered emails.
-    # A None hash is a Google/GitHub/Telegram-only account — verify_password
-    # never sees it, since there's nothing valid it could ever match.
+    # A None hash is a Google/GitHub-only account — verify_password never
+    # sees it, since there's nothing valid it could ever match.
     if user is None or user.password_hash is None or not verify_password(
         payload.password, user.password_hash
     ):
         if user is not None and user.password_hash is None:
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "This account signs in with Google, GitHub, or Telegram — use one of those instead.",
+                "This account signs in with Google or GitHub — use one of those instead.",
             )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong email or password.")
     if not user.is_active:
@@ -119,7 +118,7 @@ async def change_password(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "This account doesn't have a password to change — it signs in "
-            "with Google, GitHub, or Telegram.",
+            "with Google or GitHub.",
         )
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is wrong.")
@@ -150,15 +149,6 @@ async def login_google(payload: OAuthCodeRequest, db: AsyncSession = Depends(get
 async def login_github(payload: OAuthCodeRequest, db: AsyncSession = Depends(get_db)):
     try:
         profile = await oauth.exchange_github_code(payload.code, payload.redirect_uri)
-    except oauth.OAuthError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    return await _oauth_token_response(db, profile)
-
-
-@router.post("/telegram", response_model=TokenResponse)
-async def login_telegram(payload: TelegramAuthRequest, db: AsyncSession = Depends(get_db)):
-    try:
-        profile = oauth.verify_telegram_payload(payload)
     except oauth.OAuthError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return await _oauth_token_response(db, profile)

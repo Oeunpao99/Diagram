@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "../api/client";
-import type { Accent, TelegramAuthPayload, Theme, TokenResponse, User } from "../api/types";
+import type { Accent, Theme, TokenResponse, User } from "../api/types";
 import { applyTheme, storedAccent, storedTheme } from "../theme";
 
 interface AuthState {
@@ -18,7 +18,6 @@ interface AuthState {
   login: (email: string, password: string) => Promise<boolean>;
   loginGoogle: (code: string, redirectUri: string) => Promise<boolean>;
   loginGithub: (code: string, redirectUri: string) => Promise<boolean>;
-  loginTelegram: (payload: TelegramAuthPayload) => Promise<boolean>;
   register: (email: string, name: string, password: string) => Promise<boolean>;
   logout: () => void;
   setAppearance: (patch: { theme?: Theme; accent?: Accent }) => Promise<void>;
@@ -99,17 +98,6 @@ export const useAuth = create<AuthState>((set, get) => ({
       return true;
     } catch (err) {
       set({ error: message(err, "Could not sign in with GitHub."), busy: false });
-      return false;
-    }
-  },
-
-  async loginTelegram(payload) {
-    set({ busy: true, error: null });
-    try {
-      settleSession(set, await api.loginTelegram(payload));
-      return true;
-    } catch (err) {
-      set({ error: message(err, "Could not sign in with Telegram."), busy: false });
       return false;
     }
   },

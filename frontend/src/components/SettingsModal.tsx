@@ -121,7 +121,7 @@ function ProfilePane() {
         <span className="text-xs font-[550] text-ink">Email</span>
         <input
           className="rounded-[9px] border border-line bg-surface px-2.5 py-2 text-[13px] text-ink outline-none transition-[border-color,box-shadow] focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)] disabled:opacity-60"
-          value={user.email ?? "No email on file — signed in via Google, GitHub, or Telegram"}
+          value={user.email ?? "No email on file — signed in via Google or GitHub"}
           readOnly
           disabled
         />

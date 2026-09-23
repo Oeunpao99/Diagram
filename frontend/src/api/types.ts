@@ -311,8 +311,7 @@ export type Accent = "emerald" | "violet" | "blue" | "amber" | "rose";
 
 export interface User {
   id: string;
-  // Null for a Telegram-only account — that provider never hands back an
-  // email address at all.
+  // Null for a provider-only account that never hands back an email address.
   email: string | null;
   name: string;
   theme: Theme;
@@ -342,19 +341,6 @@ export interface ChatMessage {
   changes?: string[];
   warnings?: string[];
   created_at: string;
-}
-
-/** The Telegram Login Widget's callback payload, forwarded to the backend
- *  as-is — every field here (plus `hash`) is part of what gets verified
- *  server-side. See https://core.telegram.org/widgets/login */
-export interface TelegramAuthPayload {
-  id: number;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-  photo_url?: string;
-  auth_date: number;
-  hash: string;
 }
 
 /* --- saved diagrams ------------------------------------------------------- */

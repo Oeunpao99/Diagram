@@ -4,17 +4,11 @@ is, without ever trusting the browser directly.
 Google and GitHub use the standard "Authorization Code" redirect flow: the
 frontend sends the browser to the provider and gets a short-lived `code`
 back, which only this module ever exchanges (that needs the provider's
-client secret, so it can't happen client-side). Telegram has no such
-exchange — its Login Widget hands the frontend a payload signed with
-HMAC-SHA256 over the bot token, and this module's job there is just to
-recompute that signature before trusting anything in it.
+client secret, so it can't happen client-side).
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import time
 from dataclasses import dataclass
 
 import httpx
@@ -23,16 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import User
-from app.schemas.auth import TelegramAuthRequest
 
-_TELEGRAM_MAX_AGE_SECONDS = 24 * 60 * 60
 _HTTP_TIMEOUT = 10.0
 
 
 class OAuthError(Exception):
-    """Anything about the exchange/verification itself went wrong — bad
-    code, provider outage, a tampered Telegram payload. Routes turn this
-    into a 400/502/501, never a bare 500."""
+    """Anything about the exchange itself went wrong — bad code, provider
+    outage. Routes turn this into a 400/502/501, never a bare 500."""
 
 
 @dataclass
@@ -140,43 +131,6 @@ async def exchange_github_code(code: str, redirect_uri: str) -> ProviderProfile:
         email=email,
         email_verified=bool(email),
         name=profile.get("name") or profile.get("login") or "GitHub user",
-    )
-
-
-def verify_telegram_payload(payload: TelegramAuthRequest) -> ProviderProfile:
-    """Recomputes Telegram's documented HMAC check: sha256(bot token) as the
-    key, over every non-empty field (excluding `hash` itself) as sorted
-    `key=value` lines. https://core.telegram.org/widgets/login#checking-authorization"""
-    if not settings.telegram_bot_token:
-        raise OAuthError("Telegram sign-in isn't configured.")
-
-    fields = {
-        "auth_date": payload.auth_date,
-        "first_name": payload.first_name,
-        "id": payload.id,
-        "last_name": payload.last_name,
-        "photo_url": payload.photo_url,
-        "username": payload.username,
-    }
-    check_string = "\n".join(
-        f"{key}={value}" for key, value in sorted(fields.items()) if value is not None
-    )
-    secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
-    expected = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, payload.hash):
-        raise OAuthError("That Telegram sign-in couldn't be verified.")
-    if time.time() - payload.auth_date > _TELEGRAM_MAX_AGE_SECONDS:
-        raise OAuthError("That Telegram sign-in has expired — try again.")
-
-    name = payload.first_name
-    if payload.last_name:
-        name = f"{name} {payload.last_name}"
-    return ProviderProfile(
-        provider="telegram",
-        provider_id=str(payload.id),
-        email=None,
-        email_verified=False,
-        name=name or payload.username or "Telegram user",
     )
 
 

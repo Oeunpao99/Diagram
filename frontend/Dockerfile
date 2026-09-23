@@ -4,10 +4,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# Populates the login widget's @username at build time — Vite only embeds
-# process.env-visible vars (VITE_*) that exist when `npm run build` runs.
-ARG VITE_TELEGRAM_BOT_USERNAME
-ENV VITE_TELEGRAM_BOT_USERNAME=$VITE_TELEGRAM_BOT_USERNAME
 RUN npm run build
 
 # --- serve stage ----------------------------------------------------------
