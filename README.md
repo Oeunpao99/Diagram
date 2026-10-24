@@ -1,4 +1,4 @@
-# Diagram Copilot
+# Diagram Copilot AI
 
 Describe a process, get an editable diagram, then keep telling the AI what to change.
 
