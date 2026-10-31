@@ -214,6 +214,24 @@ const runX = runCandidates(
   return dedup([[srcX, srcY], exit, [srcX, exit[1]], [srcX, enter[1]], enter, [tgtX, tgtY]]);
 }
 
+/** Midpoint of the longest run. Picking a vertex instead (the old
+ *  `points[len / 2]`) put the label on the target end of a straight edge and
+ *  on a bend next to the target otherwise, where the node covered it. */
+function labelAnchor(points: readonly (readonly [number, number])[]): [number, number] {
+  let best = 0;
+  let bestLen = -1;
+  for (let i = 0; i < points.length - 1; i++) {
+    const len = Math.hypot(points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]);
+    if (len > bestLen) {
+      bestLen = len;
+      best = i;
+    }
+  }
+  const [ax, ay] = points[best];
+  const [bx, by] = points[best + 1] ?? points[best];
+  return [(ax + bx) / 2, (ay + by) / 2];
+}
+
 /** Custom renderer for smoothstep edges: instead of trusting the default
  *  corridor (a straight run at the source's mid-height, which slices straight
  *  through any shape sitting between the two endpoints), the line picks a run
@@ -281,7 +299,7 @@ export const FlowEdge = memo(function FlowEdge({
   }
   d += ` L ${points[points.length - 1][0]} ${points[points.length - 1][1]}`;
 
-  const [labelX, labelY] = points[Math.floor(points.length / 2)];
+  const [labelX, labelY] = labelAnchor(points);
 
   return (
     <BaseEdge
