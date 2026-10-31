@@ -163,6 +163,43 @@ function routePoints(
   const horizontal = srcSide === Position.Right || srcSide === Position.Left ||
     tgtSide === Position.Right || tgtSide === Position.Left;
 
+  // Ports facing each other across open space (Right → Left with the target
+  // further right, Bottom → Top with it further down, or the mirrors): take
+  // the classic step with its bend halfway across. The general route below
+  // bends at the target's standoff instead, which for a small offset leaves
+  // an 18px stub that the arrowhead sits right on top of and reads as a hook.
+  const facing =
+    (srcSide === Position.Right && tgtSide === Position.Left && tgtX - srcX > STANDOFF * 2) ||
+    (srcSide === Position.Left && tgtSide === Position.Right && srcX - tgtX > STANDOFF * 2) ||
+    (srcSide === Position.Bottom && tgtSide === Position.Top && tgtY - srcY > STANDOFF * 2) ||
+    (srcSide === Position.Top && tgtSide === Position.Bottom && srcY - tgtY > STANDOFF * 2);
+  if (facing) {
+    const across = srcSide === Position.Right || srcSide === Position.Left;
+    const offset = across ? Math.abs(tgtY - srcY) : Math.abs(tgtX - srcX);
+    // A port a pixel or two off its partner is meant to be a straight line.
+    if (offset <= 2) return [[srcX, srcY], [tgtX, tgtY]];
+    const mid = across ? (srcX + tgtX) / 2 : (srcY + tgtY) / 2;
+    const pts: [number, number][] = across
+      ? [[srcX, srcY], [mid, srcY], [mid, tgtY], [tgtX, tgtY]]
+      : [[srcX, srcY], [srcX, mid], [tgtX, mid], [tgtX, tgtY]];
+    if (segmentsClear(pts, obstacles)) return pts;
+  }
+
+  // Both ports on the same side (a loop back up the right of a vertical
+  // flow): ride a run just outside whichever box sticks out further, so the
+  // line never doubles back over the narrower one.
+  if (srcSide === tgtSide) {
+    const across = srcSide === Position.Right || srcSide === Position.Left;
+    const sign = srcSide === Position.Right || srcSide === Position.Bottom ? 1 : -1;
+    const run = across
+      ? sign * Math.max(sign * exit[0], sign * enter[0])
+      : sign * Math.max(sign * exit[1], sign * enter[1]);
+    const pts: [number, number][] = across
+      ? [[srcX, srcY], [run, srcY], [run, tgtY], [tgtX, tgtY]]
+      : [[srcX, srcY], [srcX, run], [tgtX, run], [tgtX, tgtY]];
+    if (segmentsClear(pts, obstacles)) return pts;
+  }
+
   if (horizontal) {
     // Travel along x; the connector snaps to a clear y across the corridor.
     const corridor: [number, number] = [exit[0], enter[0]];

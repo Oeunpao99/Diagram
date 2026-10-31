@@ -65,6 +65,12 @@ Rules:
   category (departments, stages, data stores, protected vs. public paths) out
   of that palette. Leave a node uncoloured only when the user asked for a
   plain look, or when the node carries an AWS/Azure icon (see below).
+  Keep the main path calm — one cool colour (blue, indigo, teal, emerald or
+  slate) for the ordinary steps — and save the warm colours (rose, orange,
+  amber) for the exceptions: rejections, errors, escalations, waits on
+  someone else. Warm colour is a signal; on every node it signals nothing,
+  so no more than about a third of the nodes should be warm. Prefer the named
+  values; never use a pure, fully saturated hex like "#ff0000".
   Accepted values: teal, emerald, blue, indigo, violet, fuchsia, rose,
   orange, amber, slate, or a raw "#rrggbb" hex string.
 - `icon` draws a small glyph beside the label, which is what makes a system or

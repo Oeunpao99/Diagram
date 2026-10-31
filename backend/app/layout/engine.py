@@ -15,6 +15,7 @@ Swimlane mode replaces step 3/4: layer drives one axis, lane drives the other.
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict, deque
 
 from app.schemas.diagram import DiagramDoc, Direction, Node, NodeKind, Position, Rect
@@ -35,6 +36,44 @@ PORT_STANDOFF = 20.0
 # Slack around a node box when asking "does this line run over it" — a line
 # grazing the border still reads as touching.
 CORRIDOR_PAD = 6.0
+
+# Port pairs (source_handle, target_handle) — ids match the <Handle>s in
+# nodes.tsx: a source leaves right (None), bottom "b", left "w" or top "n"; a
+# target is entered left (None), top "t", right "e" or bottom "s".
+#
+# FORWARD is the pair an edge into the very next layer takes, so the main flow
+# runs out of the side facing downstream and into the side facing upstream —
+# bottom-to-top in a TB diagram, not the right-to-left LR pair, which drew
+# every step of a vertical flow as a sideways S. SIDE is where back edges and
+# layer-skipping edges go to stay clear of that corridor: below the row in a
+# horizontal flow, up the right-hand side in a vertical one. CHOICES is what
+# the post-placement reroute may switch a free edge between.
+_FORWARD = {
+    Direction.LR: (None, None),
+    Direction.RL: ("w", "e"),
+    Direction.TB: ("b", "t"),
+    Direction.BT: ("n", "s"),
+}
+_SIDE = {
+    Direction.LR: ("b", "t"),
+    Direction.RL: ("b", "t"),
+    Direction.TB: (None, "e"),
+    Direction.BT: (None, "e"),
+}
+_CHOICES = {
+    Direction.LR: [(None, None), ("b", "t")],
+    Direction.RL: [("w", "e"), ("b", "t")],
+    # In a vertical flow a decision's side branch leaves sideways and drops
+    # into the branch's top (or rises into its bottom, for BT) — the L every
+    # hand-drawn flowchart uses — instead of sharing the bottom port with the
+    # main path.
+    Direction.TB: [("b", "t"), (None, "e"), (None, None), ("w", "e"), (None, "t"), ("w", "t")],
+    Direction.BT: [("n", "s"), (None, "e"), (None, None), ("w", "e"), (None, "s"), ("w", "s")],
+}
+# doc.meta key recording the handles layout chose itself ({edge id: [source,
+# target]}), so the next full relayout knows it may re-decide them — unlike a
+# handle the user picked by dragging, which is never silently reverted.
+AUTO_HANDLES = "auto_handles"
 
 # Radial ("circle diagram") layout. Gap between neighbouring wedges, in
 # degrees, and how far past the outer ring a wedge's label starts.
@@ -237,7 +276,8 @@ def apply_layout(
     layers: dict[int, list[str]] = defaultdict(list)
     for node_id in node_ids:
         layers[depth_of[node_id]].append(node_id)
-    _route_edges(doc, depth_of)
+    free = _free_edges(doc)
+    _route_edges(depth_of, free, direction)
 
     if algorithm == "radial":
         _place_radial(doc)
@@ -257,7 +297,9 @@ def apply_layout(
 
     # Runs last, on final coordinates — after fit-to-box and after the
     # RL/BT mirror, both of which move nodes out from under their edges.
-    _reroute_crossing_edges(doc)
+    spine = _spine(doc, layers)
+    _reroute_crossing_edges(doc, free, direction, frozenset(zip(spine, spine[1:])))
+    doc.meta[AUTO_HANDLES] = {e.id: [e.source_handle, e.target_handle] for e in free}
     _place_groups(doc)
 
     if target:
@@ -266,11 +308,13 @@ def apply_layout(
     return doc
 
 
-def _route_edges(doc: DiagramDoc, depth_of: dict[str, int]) -> None:
+def _route_edges(
+    depth_of: dict[str, int], free: list, direction: Direction
+) -> None:
     """Keep back/lateral and layer-skipping edges out of the main corridor.
 
-    Every edge defaults to the same pair of ports — right side out, left side
-    in — because that's what an edge to the *very next* layer wants. Two
+    Every edge defaults to the same pair of ports — the direction's forward
+    pair — because that's what an edge to the *very next* layer wants. Two
     kinds of edge get hurt by that default:
 
     * Anything that doesn't advance (a decision's rejection branch, a
@@ -280,25 +324,43 @@ def _route_edges(doc: DiagramDoc, depth_of: dict[str, int]) -> None:
       escalation — has to cross every layer in between, and the straight
       right-to-left run puts it directly over whatever nodes sit there.
 
-    Both want the node's top/bottom ports instead, which the layer-to-layer
-    flow never uses, so they get their own lane clear of it. An edge to the
-    adjacent layer keeps left/right: there is nothing between its endpoints
-    to collide with, and it *is* the main flow.
+    Both want a port pair the layer-to-layer flow never uses (`_SIDE`), so
+    they get their own lane clear of it. An edge to the adjacent layer takes
+    the direction's forward pair: there is nothing between its endpoints to
+    collide with, and it *is* the main flow.
 
-    Only touches edges that have never had a handle chosen (by a user's
-    manual drag, or by an earlier run of this same step) — a deliberate
-    choice is never silently reverted.
+    Only touches `free` edges — see `_free_edges`. A handle the user chose by
+    dragging is never silently reverted.
     """
-    for edge in doc.edges:
+    forward, side = _FORWARD[direction], _SIDE[direction]
+    for edge in free:
         s_depth = depth_of.get(edge.source)
         t_depth = depth_of.get(edge.target)
         if s_depth is None or t_depth is None:
             continue
-        stays_in_corridor = t_depth == s_depth + 1
-        if stays_in_corridor or edge.source_handle is not None or edge.target_handle is not None:
-            continue
-        edge.source_handle = "b"
-        edge.target_handle = "t"
+        edge.source_handle, edge.target_handle = (
+            forward if t_depth == s_depth + 1 else side
+        )
+
+
+def _free_edges(doc: DiagramDoc) -> list:
+    """Edges whose ports layout may choose: never given a handle, or still
+    carrying exactly the pair an earlier layout recorded for them. Diagrams
+    laid out before that record existed only ever got ("b", "t") from layout,
+    so on those that pair counts as layout's own too."""
+    recorded = doc.meta.get(AUTO_HANDLES)
+    legacy = not isinstance(recorded, dict)
+    recorded = recorded if isinstance(recorded, dict) else {}
+    free = []
+    for edge in doc.edges:
+        pair = (edge.source_handle, edge.target_handle)
+        if (
+            pair == (None, None)
+            or recorded.get(edge.id) == list(pair)
+            or (legacy and pair == ("b", "t"))
+        ):
+            free.append(edge)
+    return free
 
 
 def _corridor(source: Node, target: Node, source_handle: str | None, target_handle: str | None):
@@ -316,10 +378,60 @@ def _corridor(source: Node, target: Node, source_handle: str | None, target_hand
         mid_x = (p0[0] + p1[0]) / 2
         return [p0, (mid_x, p0[1]), (mid_x, p1[1]), p1]
 
-    p0 = (source.position.x + source.size.width / 2, source.position.y + source.size.height)
-    p1 = (target.position.x + target.size.width / 2, target.position.y)
-    run_y = max(p0[1], p1[1]) + PORT_STANDOFF
-    return [p0, (p0[0], run_y), (p1[0], run_y), p1]
+    if (source_handle, target_handle) == ("b", "t"):
+        p0 = (source.position.x + source.size.width / 2, source.position.y + source.size.height)
+        p1 = (target.position.x + target.size.width / 2, target.position.y)
+        if p1[1] - p0[1] > PORT_STANDOFF * 2:
+            # Target below: the canvas steps across halfway down.
+            mid_y = (p0[1] + p1[1]) / 2
+            return [p0, (p0[0], mid_y), (p1[0], mid_y), p1]
+        run_y = max(p0[1], p1[1]) + PORT_STANDOFF
+        return [p0, (p0[0], run_y), (p1[0], run_y), p1]
+
+    p0, d0 = _port(source, _SOURCE_SIDE.get(source_handle, "right"))
+    p1, d1 = _port(target, _TARGET_SIDE.get(target_handle, "left"))
+    a = (p0[0] + d0[0] * PORT_STANDOFF, p0[1] + d0[1] * PORT_STANDOFF)
+    b = (p1[0] + d1[0] * PORT_STANDOFF, p1[1] + d1[1] * PORT_STANDOFF)
+    for axis in (0, 1):
+        if not (d0[axis] and d1[axis]):
+            continue
+        other = 1 - axis
+
+        def pt(along: float, across: float) -> tuple[float, float]:
+            return (along, across) if axis == 0 else (across, along)
+
+        if d0[axis] == d1[axis]:
+            # Both ports face the same way: ride outside the further one.
+            run = max(a[axis], b[axis]) if d0[axis] > 0 else min(a[axis], b[axis])
+            return [p0, pt(run, p0[other]), pt(run, p1[other]), p1]
+        if (b[axis] - a[axis]) * d0[axis] >= 0:
+            # Facing each other across open space: step over halfway.
+            mid = (p0[axis] + p1[axis]) / 2
+            return [p0, pt(mid, p0[other]), pt(mid, p1[other]), p1]
+        mid = (p0[other] + p1[other]) / 2
+        return [p0, a, pt(a[axis], mid), pt(b[axis], mid), b, p1]
+    # One horizontal port, one vertical: a single bend.
+    corner = (p1[0], p0[1]) if d0[0] else (p0[0], p1[1])
+    return [p0, corner, p1]
+
+
+_SOURCE_SIDE = {None: "right", "b": "bottom", "w": "left", "n": "top",
+                "tl": "top", "tr": "top", "bl": "bottom", "br": "bottom"}
+_TARGET_SIDE = {None: "left", "t": "top", "e": "right", "s": "bottom",
+                "tl": "top", "tr": "top", "bl": "bottom", "br": "bottom"}
+
+
+def _port(node: Node, side: str) -> tuple[tuple[float, float], tuple[int, int]]:
+    """A side's mid-point and the unit vector pointing out of the box there."""
+    x, y = node.position.x, node.position.y
+    w, h = node.size.width, node.size.height
+    if side == "right":
+        return (x + w, y + h / 2), (1, 0)
+    if side == "left":
+        return (x, y + h / 2), (-1, 0)
+    if side == "top":
+        return (x + w / 2, y), (0, -1)
+    return (x + w / 2, y + h), (0, 1)
 
 
 def _crossings(points, nodes: list[Node], skip: set[str]) -> int:
@@ -374,7 +486,12 @@ def _edge_conflict(a: tuple, b: tuple) -> int:
     return 0
 
 
-def _reroute_crossing_edges(doc: DiagramDoc) -> None:
+def _reroute_crossing_edges(
+    doc: DiagramDoc,
+    free: list,
+    direction: Direction,
+    spine_links: frozenset[tuple[str, str]] = frozenset(),
+) -> None:
     """Last pass, once every node has its final position: move an edge off
     the default ports when the line that draws would be tangled.
 
@@ -388,9 +505,10 @@ def _reroute_crossing_edges(doc: DiagramDoc) -> None:
     *on top of it*, fused into one unreadable stroke. Only real coordinates
     show either.
 
-    So each free edge chooses between the tidy left-to-right default and the
-    top/bottom pair that gets its own lane, judged on what the drawn polyline
-    would actually run into:
+    So each free edge chooses among the direction's port pairs (`_CHOICES`:
+    the forward pair, the side lane, and for a vertical flow the sideways
+    exits a decision's branches use), judged on what the drawn polyline would
+    actually run into:
 
     * node boxes first — an arrow slicing clean through a shape is far worse
       than crossing a couple of lines, and one node hit is weighted higher
@@ -406,64 +524,82 @@ def _reroute_crossing_edges(doc: DiagramDoc) -> None:
     everywhere else.
     """
     by_id = {n.id: n for n in doc.nodes}
-    free = [
-        e
-        for e in doc.edges
-        if e.source_handle is None
-        and e.target_handle is None
-        and e.source in by_id
-        and e.target in by_id
-    ]
+    free = [e for e in free if e.source in by_id and e.target in by_id]
     if not free:
         return
+    choices = _CHOICES[direction]
 
-    def polyline(e):
-        return _corridor(by_id[e.source], by_id[e.target], e.source_handle, e.target_handle)
+    def polyline(e, pair):
+        return _corridor(by_id[e.source], by_id[e.target], *pair)
 
     # One node sliced clean through outweighs any web of line crossings.
     NODE_OVERLAP_COST = 100
 
-    def total_cost() -> int:
-        cost = 0
-        polylines = []
-        for e in free:
-            cost += NODE_OVERLAP_COST * _crossings(polyline(e), doc.nodes, {e.source, e.target})
-            polylines.append(polyline(e))
-        for i, a in enumerate(polylines):
-            for b in polylines[i + 1 :]:
-                for A in _segments(a):
-                    for B in _segments(b):
-                        cost += _edge_conflict(A, B)
+    # Every drawn line, fixed ones included — a free edge crossing a
+    # hand-routed one counts just the same. Kept as segments, refreshed
+    # whenever a move is taken.
+    edge_by_id = {e.id: e for e in doc.edges if e.source in by_id and e.target in by_id}
+    segs = {
+        eid: _segments(polyline(e, (e.source_handle, e.target_handle)))
+        for eid, e in edge_by_id.items()
+    }
+    initial = {e.id: (e.source_handle, e.target_handle) for e in free}
+
+    def edge_cost(e, pair) -> int:
+        """What this one edge contributes to the figure's total if drawn
+        through `pair`. Only this edge's own terms change when it moves, so a
+        candidate is judged by the difference against its current cost — the
+        same choice a whole-figure recount would make, without one per try."""
+        points = polyline(e, pair)
+        cost = NODE_OVERLAP_COST * _crossings(points, doc.nodes, {e.source, e.target})
+        # `_crossings` skips the edge's own two nodes, so a line that leaves
+        # a port heading back over its own box (out of the right side towards
+        # a branch on the left) has to be caught here — it is just as much a
+        # line through a shape.
+        _, d0 = _port(by_id[e.source], _SOURCE_SIDE.get(pair[0], "right"))
+        _, d1 = _port(by_id[e.target], _TARGET_SIDE.get(pair[1], "left"))
+        (x0, y0), (x1, y1) = points[0], points[1]
+        (xa, ya), (xb, yb) = points[-1], points[-2]
+        if (x1 - x0) * d0[0] + (y1 - y0) * d0[1] < 0 or (xb - xa) * d1[0] + (yb - ya) * d1[1] < 0:
+            cost += NODE_OVERLAP_COST
+        # Leaving the routed pair costs a little, and leaving it on the main
+        # path a little more, so when moving either of two lines would clear
+        # a conflict, it's the side branch that moves and the spine stays put.
+        if pair != initial[e.id]:
+            cost += 3 if (e.source, e.target) in spine_links else 1
+        mine = _segments(points)
+        for other_id, theirs in segs.items():
+            if other_id == e.id:
+                continue
+            other = edge_by_id[other_id]
+            # Lines converging on one port of one node are meant to meet
+            # there — several arrows into "Ticket created" is the picture,
+            # not a tangle.
+            if other.target == e.target and other.target_handle == pair[1]:
+                continue
+            for A in mine:
+                for B in theirs:
+                    cost += _edge_conflict(A, B)
         return cost
 
-    current = total_cost()
-    while True:
-        best_edge = None
-        best_cost = current
+    # Take the single move that most lowers the total, until none does.
+    for _ in range(len(free) * len(choices)):
+        best = None
+        best_gain = 0
         for e in free:
-            # Flip it and measure the whole figure, then put it back unless
-            # the flip was (kept) the best single move found.
-            flip = e.source_handle is None
-            if flip:
-                e.source_handle, e.target_handle = "b", "t"
-            else:
-                e.source_handle, e.target_handle = None, None
-            cost = total_cost()
-            if cost < best_cost:
-                best_cost = cost
-                best_edge = e
-            if flip:
-                e.source_handle, e.target_handle = None, None
-            else:
-                e.source_handle, e.target_handle = "b", "t"
-        if best_edge is None or best_cost >= current:
+            current = (e.source_handle, e.target_handle)
+            base = edge_cost(e, current)
+            for pair in choices:
+                if pair == current:
+                    continue
+                gain = base - edge_cost(e, pair)
+                if gain > best_gain:
+                    best_gain, best = gain, (e, pair)
+        if best is None:
             break
-        flip = best_edge.source_handle is None
-        if flip:
-            best_edge.source_handle, best_edge.target_handle = "b", "t"
-        else:
-            best_edge.source_handle, best_edge.target_handle = None, None
-        current = best_cost
+        e, pair = best
+        e.source_handle, e.target_handle = pair
+        segs[e.id] = _segments(polyline(e, pair))
 
 
 def _place_layered(
@@ -512,12 +648,99 @@ def _place_layered(
                     node.position.x = base + offset
                     node.position.y = flow
             flow += layer_extent[depth] + LAYER_GAP
+        if not group_of:
+            _align_spine(doc, layers, horizontal)
 
     if direction in (Direction.RL, Direction.BT):
         _mirror(doc, horizontal)
 
     if width is not None and height is not None:
         _fit_to_box(doc, width, height)
+
+
+# Branch labels that mark the exception path rather than the main one, so an
+# otherwise even choice keeps "Yes"/"Approved" on the spine.
+_NEGATIVE_LABEL = re.compile(
+    r"^\s*(no|not|reject|declin|deni|fail|cancel|error|invalid|timeout|time out|escalat|missing)",
+    re.IGNORECASE,
+)
+
+
+def _spine(doc: DiagramDoc, layers: dict[int, list[str]]) -> list[str]:
+    """The main path: the longest layer-by-layer chain from an entry point,
+    preferring the positive branch at each decision when lengths tie.
+
+    Longest-path layering gives every node past the first layer a predecessor
+    exactly one layer back, so this chain visits every layer."""
+    depth_of = {nid: d for d, ids in layers.items() for nid in ids}
+    nexts: dict[str, list] = defaultdict(list)
+    for edge in doc.edges:
+        if edge.source in depth_of and depth_of.get(edge.target) == depth_of[edge.source] + 1:
+            nexts[edge.source].append(edge)
+
+    height: dict[str, int] = {}
+    for depth in sorted(layers, reverse=True):
+        for nid in layers[depth]:
+            height[nid] = 1 + max((height[e.target] for e in nexts[nid]), default=0)
+
+    if not layers:
+        return []
+    first = min(layers)
+    current = max(layers[first], key=lambda nid: height[nid])
+    path = [current]
+    while nexts[current]:
+        edge = max(
+            nexts[current],
+            key=lambda e: (
+                height[e.target],
+                not _NEGATIVE_LABEL.match(e.label or e.condition or ""),
+            ),
+        )
+        current = edge.target
+        path.append(current)
+    return path
+
+
+def _align_spine(doc: DiagramDoc, layers: dict[int, list[str]], horizontal: bool) -> None:
+    """Line the main path up on one axis, the way a hand-drawn flowchart reads.
+
+    Centring each layer on its own puts the main step off-centre whenever a
+    side branch shares its layer, so the primary path zig-zags. Shifting each
+    layer as a block keeps its own ordering and spacing intact; only where
+    the layer sits across the flow changes. Layers sit at different points
+    along the flow, so shifting them never makes two of them overlap."""
+    by_id = {n.id: n for n in doc.nodes}
+    spine = _spine(doc, layers)
+    if len(spine) < 2:
+        return
+
+    def centre(node: Node) -> float:
+        if horizontal:
+            return node.position.y + node.size.height / 2
+        return node.position.x + node.size.width / 2
+
+    axis = centre(by_id[spine[0]])
+    on_spine = set(spine)
+    for ids in layers.values():
+        anchor = next((nid for nid in ids if nid in on_spine), None)
+        if anchor is None:
+            continue
+        shift = axis - centre(by_id[anchor])
+        for nid in ids:
+            if horizontal:
+                by_id[nid].position.y += shift
+            else:
+                by_id[nid].position.x += shift
+
+    # Shifting can push a layer past the origin; keep coordinates positive.
+    if horizontal:
+        low = min(n.position.y for n in doc.nodes)
+        for node in doc.nodes:
+            node.position.y -= low
+    else:
+        low = min(n.position.x for n in doc.nodes)
+        for node in doc.nodes:
+            node.position.x -= low
 
 
 def _group_layer_spans(depth_of: dict[str, int], group_of: dict[str, str]) -> set[int]:
