@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import AuthCallback from "./pages/AuthCallback";
 import DiagramsList from "./pages/DiagramsList";
+import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";
@@ -24,6 +25,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (booting) return <div className="min-h-screen bg-paper" role="status" aria-label="Loading" />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
+}
+
+/** `/` — the studio for signed-in users, the landing page for everyone else. */
+function Home() {
+  const user = useAuth((s) => s.user);
+  const booting = useAuth((s) => s.booting);
+  if (booting) return <div className="min-h-screen bg-paper" role="status" aria-label="Loading" />;
+  return user ? <Studio /> : <Landing />;
+}
+
+/** `/shared/:token` — a share link resolves to a diagram, not a diagram id,
+ *  so this reads the token out of the URL and hands it to Studio instead of
+ *  duplicating Studio's whole layout for one different data-loading path. */
+function SharedStudio() {
+  const { token } = useParams<{ token: string }>();
+  return <Studio sharedToken={token} />;
 }
 
 export default function App() {
@@ -54,11 +71,12 @@ export default function App() {
           </RequireAuth>
         }
       />
+      <Route path="/" element={<Home />} />
       <Route
-        path="/"
+        path="/shared/:token"
         element={
           <RequireAuth>
-            <Studio />
+            <SharedStudio />
           </RequireAuth>
         }
       />

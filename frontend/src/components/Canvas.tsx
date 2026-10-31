@@ -66,6 +66,10 @@ const DRAW_PAD = 10; // px of breathing room around the stroke's own bounds
 export function Canvas() {
   const doc = useDiagram((s) => s.doc);
   const setDoc = useDiagram((s) => s.setDoc);
+  // A view-only share: the backend rejects every write regardless (see
+  // app.api.deps.diagram_access), but that shouldn't mean the canvas lets
+  // someone drag a node three inches before finding out it didn't stick.
+  const readOnly = useDiagram((s) => s.access === "view");
   const prefs = useSettings((s) => s.prefs);
   const setSelection = useDiagram((s) => s.setSelection);
   const selection = useDiagram((s) => s.selection);
@@ -1305,12 +1309,12 @@ export function Canvas() {
         onNodesDelete={deleteSelected}
         onConnect={onConnect}
         onReconnect={onReconnect}
-        edgesReconnectable={tool === "select"}
+        edgesReconnectable={!readOnly && tool === "select"}
         onSelectionChange={onSelectionChange}
         onPaneClick={onPaneClick}
-        nodesDraggable={tool === "select"}
-        nodesConnectable={tool === "select" || tool === "connector"}
-        elementsSelectable={tool === "select" || tool === "hand"}
+        nodesDraggable={!readOnly && tool === "select"}
+        nodesConnectable={!readOnly && (tool === "select" || tool === "connector")}
+        elementsSelectable={!readOnly && (tool === "select" || tool === "hand")}
         panOnDrag={panOnDrag}
         selectionOnDrag={tool === "select"}
         panOnScroll

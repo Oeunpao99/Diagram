@@ -50,6 +50,18 @@ interface DiagramState {
    *  not diagram content, so it doesn't travel through save/load the way
    *  nodes and edges do. */
   projectId: string | null;
+  /** How the signed-in account reached the open diagram: "owner" for one of
+   *  your own, or "view"/"edit" if it was opened through someone else's
+   *  share link (see loadShared). Every write path — autosave, the Copilot
+   *  chat, direct canvas edits — is expected to check this before touching
+   *  anything; the backend enforces the same rule independently, so a UI
+   *  gap here is a bad experience, not a security hole. */
+  access: "owner" | "view" | "edit";
+  /** This diagram's own share link, if the owner has ever turned it on —
+   *  null otherwise. Only meaningful when access === "owner": a viewer or
+   *  editor doesn't get to see or change it. */
+  shareToken: string | null;
+  shareRole: "view" | "edit" | null;
   validation: ValidationReport | null;
   improved: ImprovedPrompt | null;
   changeLog: string[];
@@ -132,6 +144,16 @@ interface DiagramState {
   hydrate: () => Promise<void>;
   /** Open a saved diagram and make it the one autosave writes to. */
   loadDiagram: (id: string) => Promise<void>;
+  /** Open a diagram through someone else's share link (see App.tsx's
+   *  `/shared/:token` route) — same effect as loadDiagram, but by token
+   *  instead of id, and it adopts whatever access level the link grants
+   *  (recorded in `access`) instead of assuming ownership. */
+  loadShared: (token: string) => Promise<void>;
+  /** Turns sharing on for the open diagram, or changes an existing share's
+   *  role — owner only, mirrors the backend the same way. */
+  shareDiagram: (role: "view" | "edit") => Promise<void>;
+  /** Revokes the open diagram's share link. */
+  unshareDiagram: () => Promise<void>;
   /** Detach from the current diagram so the next edit starts a fresh record.
    *  An optional projectId scopes that record to a project the moment
    *  autosave first creates it — see `pendingProjectId` below. */
@@ -236,11 +258,15 @@ async function persist() {
     schedulePersist(300);
     return;
   }
-  const { doc, diagramId, busy } = useDiagram.getState();
+  const { doc, diagramId, busy, access } = useDiagram.getState();
   if (busy) {
     schedulePersist(300);
     return;
   }
+  // A view-only share can't write here — the backend would 404 it anyway
+  // (see app.api.deps.diagram_access), but failing every 900ms in the
+  // background isn't a real "best-effort", it's just noise.
+  if (access === "view") return;
   // A truly blank canvas is a placeholder, not a record worth persisting.
   if (doc.nodes.length === 0 && doc.edges.length === 0) return;
 
@@ -333,6 +359,9 @@ export const useDiagram = create<DiagramState>((set, get) => ({
   doc: emptyDoc(),
   diagramId: null,
   projectId: null,
+  access: "owner",
+  shareToken: null,
+  shareRole: null,
   validation: null,
   improved: null,
   changeLog: [],
@@ -435,6 +464,9 @@ export const useDiagram = create<DiagramState>((set, get) => ({
           doc: normalizeDoc(result.data),
           diagramId: result.id,
           projectId: result.project_id,
+          access: result.access,
+          shareToken: result.share_token,
+          shareRole: result.share_role,
           hydrated: true,
         });
         void loadMessagesFor(result.id);
@@ -455,6 +487,9 @@ export const useDiagram = create<DiagramState>((set, get) => ({
         doc: normalizeDoc(result.data),
         diagramId: result.id,
         projectId: result.project_id,
+        access: result.access,
+        shareToken: result.share_token,
+        shareRole: result.share_role,
         validation: null,
         changeLog: [],
         improved: null,
@@ -475,6 +510,62 @@ export const useDiagram = create<DiagramState>((set, get) => ({
     }
   },
 
+  loadShared: async (token) => {
+    try {
+      const result = await api.openSharedDiagram(token);
+      suppressNextAutosave = true;
+      set((state) => ({
+        doc: normalizeDoc(result.data),
+        diagramId: result.id,
+        projectId: result.project_id,
+        access: result.access,
+        shareToken: result.share_token,
+        shareRole: result.share_role,
+        validation: null,
+        changeLog: [],
+        improved: null,
+        selection: [],
+        edgeSelection: [],
+        messages: [],
+        past: [...state.past, state.doc].slice(-HISTORY_LIMIT),
+        future: [],
+      }));
+      // A share is opened for the *diagram*, not the token — once it's
+      // loaded, every other read (versions, messages, a future hydrate)
+      // goes through the normal id-based routes, which enforce the same
+      // access rule independently. This also makes it the browser's
+      // "current" diagram the way loadDiagram does, so returning to the
+      // studio without the link still reopens it (as long as access holds).
+      writeStoredDiagramId(result.id);
+      get().bumpSaved();
+      void loadMessagesFor(result.id);
+    } catch (error) {
+      set({ error: message(error) });
+    }
+  },
+
+  shareDiagram: async (role) => {
+    const { diagramId } = get();
+    if (!diagramId) return;
+    try {
+      const result = await api.shareDiagram(diagramId, role);
+      set({ shareToken: result.share_token, shareRole: result.share_role });
+    } catch (error) {
+      set({ error: message(error) });
+    }
+  },
+
+  unshareDiagram: async () => {
+    const { diagramId } = get();
+    if (!diagramId) return;
+    try {
+      const result = await api.unshareDiagram(diagramId);
+      set({ shareToken: result.share_token, shareRole: result.share_role });
+    } catch (error) {
+      set({ error: message(error) });
+    }
+  },
+
   beginNew: (projectId) => {
     pendingProjectId = projectId;
     pendingMessages = [];
@@ -482,6 +573,11 @@ export const useDiagram = create<DiagramState>((set, get) => ({
     set({
       diagramId: null,
       projectId: projectId ?? null,
+      // A fresh diagram is always yours — clears any view/edit-by-share
+      // state left over from whatever was open before.
+      access: "owner",
+      shareToken: null,
+      shareRole: null,
       validation: null,
       changeLog: [],
       improved: null,

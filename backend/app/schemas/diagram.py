@@ -409,6 +409,15 @@ class ProjectOut(BaseModel):
     diagram_count: int
 
 
+class ShareRole(str, Enum):
+    view = "view"
+    edit = "edit"
+
+
+class ShareUpdate(BaseModel):
+    role: ShareRole
+
+
 class DiagramCreate(BaseModel):
     title: str = "Untitled diagram"
     project_id: uuid.UUID | None = None
@@ -446,6 +455,13 @@ class DiagramOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     data: dict[str, Any]
+    share_token: str | None = None
+    share_role: ShareRole | None = None
+    # Not a column — set per-request by the route to "owner", "view" or
+    # "edit" (see app.api.deps.diagram_access) so the frontend can tell a
+    # diagram it owns from one opened through someone else's share link,
+    # without having to compare ids against whoever is signed in.
+    access: Literal["owner", "view", "edit"] = "owner"
 
 
 class DiagramListItem(BaseModel):

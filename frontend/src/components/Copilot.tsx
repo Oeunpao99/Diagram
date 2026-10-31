@@ -149,6 +149,10 @@ export function Copilot() {
   const generationPlan = useDiagram((s) => s.generationPlan);
   const improved = useDiagram((s) => s.improved);
   const hasNodes = useDiagram((s) => s.doc.nodes.length > 0);
+  // Opened through a view-only share link — the backend would reject any
+  // edit regardless (see app.api.deps.diagram_access), this just keeps the
+  // composer from inviting one in the first place.
+  const readOnly = useDiagram((s) => s.access === "view");
   const improvePrompt = useDiagram((s) => s.improvePrompt);
   const analyzeImage = useDiagram((s) => s.analyzeImage);
   const generate = useDiagram((s) => s.generate);
@@ -737,7 +741,7 @@ export function Copilot() {
           )}
           <div className="no-scrollbar mb-1.5 flex gap-1 overflow-x-auto pb-1">
             {!hasNodes && <span className="shrink-0 text-[11px] font-[550] text-slate-soft">Try an example —</span>}
-            {suggestions.map((suggestion) => (
+            {!readOnly && suggestions.map((suggestion) => (
               <button
                 key={suggestion}
                 title="Click to describe this diagram"
@@ -788,12 +792,15 @@ export function Copilot() {
             // here is just redundant, not a missing affordance.
             style={{ outline: "none" }}
             value={input}
+            disabled={readOnly}
             placeholder={
-              hasNodes
-                ? "Change something, ask a question, or get ideas…"
-                : attachedImage
-                  ? "Add a caption (optional)…"
-                  : "Describe what you want to diagram…"
+              readOnly
+                ? "You have view access — ask the owner for edit access to change this diagram."
+                : hasNodes
+                  ? "Change something, ask a question, or get ideas…"
+                  : attachedImage
+                    ? "Add a caption (optional)…"
+                    : "Describe what you want to diagram…"
             }
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
@@ -854,7 +861,7 @@ export function Copilot() {
                   className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px] [&_svg]:stroke-[1.6]"
                   aria-label="Attach an image of a diagram sketch"
                   title="Attach an image — the AI reads it instead of typed text"
-                  disabled={busy !== null}
+                  disabled={busy !== null || readOnly}
                   onClick={() => fileRef.current?.click()}
                 >
                   <ImageIcon />
@@ -864,7 +871,7 @@ export function Copilot() {
             <button
               className="grid size-[38px] shrink-0 place-items-center rounded-[12px] border-none bg-green text-on-accent transition-all hover:scale-[1.03] hover:bg-green-strong active:scale-95 disabled:cursor-not-allowed disabled:bg-line-strong disabled:hover:scale-100 [&_svg]:size-[17px] [&_svg]:stroke-[1.6]"
               aria-label="Send"
-              disabled={(!input.trim() && !attachedImage) || busy !== null}
+              disabled={(!input.trim() && !attachedImage) || busy !== null || readOnly}
               onClick={send}
             >
               {busy !== null ? <span className="btn__spin" aria-hidden /> : <Send />}

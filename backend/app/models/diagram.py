@@ -50,6 +50,12 @@ class Diagram(Base, UUIDMixin, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
     is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     current_version: Mapped[int] = mapped_column(Integer, default=1)
+    # A share is one link, one role, per diagram — not a per-teammate list.
+    # NULL share_token means "not currently shared"; share_role only means
+    # anything alongside a token. Regenerating the token (see the /share
+    # route) is how a link gets revoked without deleting the diagram.
+    share_token: Mapped[str | None] = mapped_column(String(43), unique=True, index=True)
+    share_role: Mapped[str | None] = mapped_column(String(10))
 
     owner: Mapped["User"] = relationship(back_populates="diagrams")  # noqa: F821
     project: Mapped["Project | None"] = relationship(back_populates="diagrams")

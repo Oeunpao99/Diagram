@@ -111,8 +111,15 @@ export function TopBar() {
   const undo = useDiagram((s) => s.undo);
   const redo = useDiagram((s) => s.redo);
   const projectId = useDiagram((s) => s.projectId);
+  const diagramId = useDiagram((s) => s.diagramId);
+  const access = useDiagram((s) => s.access);
+  const shareToken = useDiagram((s) => s.shareToken);
+  const shareRole = useDiagram((s) => s.shareRole);
+  const shareDiagram = useDiagram((s) => s.shareDiagram);
+  const unshareDiagram = useDiagram((s) => s.unshareDiagram);
   const navigate = useNavigate();
-  const [link, setLink] = useState("https://app.diagramcopilot.app/import-cargo-process");
+  const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [projectName, setProjectName] = useState<string | null>(null);
 
   // There's no GET /projects/{id} — the list is cheap (a user's own
@@ -135,13 +142,37 @@ export function TopBar() {
     };
   }, [projectId]);
 
+  // Only real once the diagram is saved (diagramId) and the owner has
+  // turned sharing on (shareToken) — nothing to copy before either.
+  const shareUrl = diagramId && shareToken ? `${window.location.origin}/shared/${shareToken}` : null;
+
   const copyLink = async () => {
+    if (!shareUrl) return;
     try {
-      await navigator.clipboard.writeText(link);
-      setLink("Copied to clipboard");
-      window.setTimeout(() => setLink("https://app.diagramcopilot.app/import-cargo-process"), 1600);
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
       /* clipboard unavailable */
+    }
+  };
+
+  const setRole = async (role: "view" | "edit") => {
+    if (!diagramId) return;
+    setSharing(true);
+    try {
+      await shareDiagram(role);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const stopSharing = async () => {
+    setSharing(true);
+    try {
+      await unshareDiagram();
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -250,25 +281,76 @@ export function TopBar() {
           </button>
         </InlineMenu>
 
-        <InlineMenu label={<Share />}>
-          <div className="px-2.5 pb-[5px] pt-1.5 text-[10.5px] font-[650] uppercase tracking-[0.06em] text-slate-soft">
-            Share
-          </div>
-          <div className="flex gap-[7px] px-[5px] pb-0.5 pt-1.5">
-            <input
-              className="min-w-0 flex-1 rounded-[7px] border border-line p-[6px] text-[12px] text-slate outline-none focus:border-green"
-              style={{ flex: 1 }}
-              readOnly
-              value={link}
-              onFocus={(e) => e.currentTarget.select()}
-            />
-            <button className="inline-flex items-center justify-center gap-[5px] whitespace-nowrap rounded-[7px] border border-line bg-surface px-2.5 py-1 text-xs font-[550] text-ink transition-[background,border-color,box-shadow] hover:border-line-strong hover:bg-surface-2" onClick={() => void copyLink()}>
-              Copy
-            </button>
-          </div>
-        </InlineMenu>
+        {access === "owner" ? (
+          <InlineMenu label={<Share />}>
+            <div className="px-2.5 pb-[5px] pt-1.5 text-[10.5px] font-[650] uppercase tracking-[0.06em] text-slate-soft">
+              Share
+            </div>
+            {!diagramId ? (
+              <div className="px-2.5 pb-2 pt-1 text-[12px] text-slate-soft">
+                Saves automatically as you type — try again in a moment.
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-[5px] px-[5px] pb-1 pt-1.5">
+                  <button
+                    className={`flex-1 rounded-[7px] border px-2.5 py-1 text-xs font-[550] transition-colors ${shareToken && shareRole === "view" ? "border-green bg-green-soft text-green-deep" : "border-line text-ink hover:bg-surface-2"}`}
+                    disabled={sharing}
+                    onClick={() => void setRole("view")}
+                  >
+                    Can view
+                  </button>
+                  <button
+                    className={`flex-1 rounded-[7px] border px-2.5 py-1 text-xs font-[550] transition-colors ${shareToken && shareRole === "edit" ? "border-green bg-green-soft text-green-deep" : "border-line text-ink hover:bg-surface-2"}`}
+                    disabled={sharing}
+                    onClick={() => void setRole("edit")}
+                  >
+                    Can edit
+                  </button>
+                </div>
+                {shareUrl ? (
+                  <>
+                    <div className="flex gap-[7px] px-[5px] pb-0.5 pt-1">
+                      <input
+                        className="min-w-0 flex-1 rounded-[7px] border border-line p-[6px] text-[12px] text-slate outline-none focus:border-green"
+                        readOnly
+                        value={shareUrl}
+                        onFocus={(e) => e.currentTarget.select()}
+                      />
+                      <button
+                        className="inline-flex items-center justify-center gap-[5px] whitespace-nowrap rounded-[7px] border border-line bg-surface px-2.5 py-1 text-xs font-[550] text-ink transition-[background,border-color,box-shadow] hover:border-line-strong hover:bg-surface-2"
+                        onClick={() => void copyLink()}
+                      >
+                        {copied ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="mx-1 my-1.5 h-px bg-line" />
+                    <button
+                      className="flex w-full items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-left text-[12.5px] text-red hover:bg-surface-2 disabled:opacity-45"
+                      disabled={sharing}
+                      onClick={() => void stopSharing()}
+                    >
+                      Stop sharing
+                    </button>
+                  </>
+                ) : (
+                  <div className="px-2.5 pb-1.5 pt-1 text-[12px] text-slate-soft">
+                    Pick Can view or Can edit to turn on a link.
+                  </div>
+                )}
+              </>
+            )}
+          </InlineMenu>
+        ) : (
+          <span
+            className="rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] font-[600] text-slate"
+            title="Opened through a share link — only the owner can change sharing."
+          >
+            {access === "edit" ? "Shared · can edit" : "Shared · view only"}
+          </span>
+        )}
 
-        <ImportMenu />
+        {access !== "view" && <ImportMenu />}
         <ExportMenu doc={doc} />
         <span className="h-5 w-px bg-line" />
 

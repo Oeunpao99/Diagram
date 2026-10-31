@@ -9,15 +9,21 @@ import { TemplateRail } from "../components/TemplateRail";
 import { TopBar } from "../components/TopBar";
 import { useDiagram } from "../store/useDiagram";
 
-/** The editor itself — what App used to render directly, now behind auth. */
-export default function Studio() {
+/** The editor itself — what App used to render directly, now behind auth.
+ *  `sharedToken` is set only by the `/shared/:token` route (see App.tsx):
+ *  it opens that diagram through the share link instead of restoring
+ *  whatever this browser last had open, and adopts the access level the
+ *  link grants rather than assuming ownership. */
+export default function Studio({ sharedToken }: { sharedToken?: string }) {
   const error = useDiagram((s) => s.error);
   const clearError = useDiagram((s) => s.clearError);
   const hydrate = useDiagram((s) => s.hydrate);
+  const loadShared = useDiagram((s) => s.loadShared);
 
   useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+    if (sharedToken) void loadShared(sharedToken);
+    else void hydrate();
+  }, [sharedToken, hydrate, loadShared]);
 
   return (
     <ReactFlowProvider>

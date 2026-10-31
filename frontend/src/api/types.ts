@@ -365,6 +365,8 @@ export interface Project {
   created_at: string;
 }
 
+export type ShareRole = "view" | "edit";
+
 /** Full record from GET/POST/PATCH /diagrams. `data` is the stored doc. */
 export interface DiagramOut {
   id: string;
@@ -380,4 +382,13 @@ export interface DiagramOut {
   created_at: string;
   updated_at: string;
   data: Partial<DiagramDoc>;
+  // Null unless the owner has ever turned sharing on for this diagram (see
+  // /diagrams/{id}/share) — one link, one role, per diagram.
+  share_token: string | null;
+  share_role: ShareRole | null;
+  // Not stored on the diagram itself — set per-request by the backend to
+  // say how *this* signed-in account reached it: the owner, or someone who
+  // opened it through the share link at that role. Drives every read-only
+  // guard in the editor.
+  access: "owner" | ShareRole;
 }

@@ -14,6 +14,7 @@ import type {
   ImprovedPrompt,
   Project,
   RouteResult,
+  ShareRole,
   Template,
   Theme,
   TokenResponse,
@@ -350,6 +351,18 @@ export const api = {
     post<DiagramOut>(`/diagrams/${id}`, { project_id }, "PATCH"),
 
   getDiagram: (id: string) => get<DiagramOut>(`/diagrams/${id}`),
+
+  // Sharing — one link, one role, per diagram (see TopBar.tsx's Share
+  // panel). share() creates the link on first use and just changes the role
+  // on every call after, so flipping Viewer <-> Editor never breaks a link
+  // someone already has.
+  shareDiagram: (id: string, role: ShareRole) =>
+    post<DiagramOut>(`/diagrams/${id}/share`, { role }),
+  unshareDiagram: (id: string) => post<DiagramOut>(`/diagrams/${id}/share`, {}, "DELETE"),
+  // What a `/shared/:token` link resolves to — any signed-in account, not
+  // just the owner's. `access` on the result says whether that landed them
+  // "view", "edit", or (following their own link) "owner".
+  openSharedDiagram: (token: string) => get<DiagramOut>(`/diagrams/shared/${token}`),
 
   // The Copilot thread attached to a diagram — see useDiagram.ts's
   // `messages`. list/add mirror getDiagram/saveDiagram's shape; clear is

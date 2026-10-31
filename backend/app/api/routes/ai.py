@@ -4,10 +4,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user
+from app.api.deps import current_user, diagram_access
 from app.db.session import get_db
 from app.layout.engine import apply_layout
 from app.models import Diagram, DiagramVersion, User
@@ -162,16 +161,14 @@ async def route(
 
 
 async def _assert_owns(db: AsyncSession, user: User, diagram_id: uuid.UUID | None) -> None:
-    """When the client says which diagram a call is about, check it's theirs —
-    the id is only used to stamp the AIRun audit row, but an unchecked id
-    would let one account write history onto another's diagram."""
+    """When the client says which diagram a call is about, check the caller
+    can actually edit it — owns it, or it's been shared with them as an
+    editor (diagram_access) — before letting the agent write history onto
+    it. An unchecked id would let one account edit another's diagram, or a
+    viewer-only share edit past its own role."""
     if diagram_id is None:
         return
-    owned = await db.execute(
-        select(Diagram.id).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
-    )
-    if owned.scalar_one_or_none() is None:
-        raise HTTPException(404, "Diagram not found.")
+    await diagram_access(db, user, diagram_id, require_edit=True)
 
 
 @router.post("/agent/stream", response_class=StreamingResponse)

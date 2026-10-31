@@ -10,7 +10,13 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.14",
     "pydantic>=2.9",
-    "pydantic-settings>=2.6",
+    # 2.15.0 shipped broken — pydantic_settings/sources/__init__.py imports
+    # .providers.nested_secrets, a submodule missing from that release's own
+    # wheel, so the app can't even start (ModuleNotFoundError at import
+    # time). Upper-bounded until a fixed release is out; see
+    # https://github.com/pydantic/pydantic-settings/issues for the tracking
+    # issue once one exists.
+    "pydantic-settings>=2.6,<2.15",
     "openai>=1.99",
     "pyjwt>=2.10",
     "argon2-cffi>=23.1",

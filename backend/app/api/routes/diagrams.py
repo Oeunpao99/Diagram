@@ -1,10 +1,11 @@
+import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import current_user
+from app.api.deps import current_user, diagram_access
 from app.db.session import get_db
 from app.models import Diagram, DiagramMessage, DiagramVersion, Project, Template, User
 from app.schemas.diagram import (
@@ -16,6 +17,7 @@ from app.schemas.diagram import (
     DiagramUpdate,
     ProjectCreate,
     ProjectOut,
+    ShareUpdate,
     TemplateOut,
     VersionOut,
 )
@@ -125,14 +127,13 @@ async def _owns_project(db: AsyncSession, user: User, project_id: uuid.UUID) -> 
     return (await db.execute(stmt)).scalar_one_or_none() is not None
 
 
-async def _get(db: AsyncSession, user: User, diagram_id: uuid.UUID) -> Diagram:
-    """Someone else's diagram is reported as missing, not forbidden — a 403
-    would confirm the id exists."""
-    stmt = select(Diagram).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
-    diagram = (await db.execute(stmt)).scalar_one_or_none()
-    if not diagram:
-        raise HTTPException(404, "Diagram not found.")
-    return diagram
+def _out(diagram: Diagram, access: str) -> DiagramOut:
+    """DiagramOut.model_validate reads `access` off the ORM object like every
+    other field, and Diagram has no such column — so it always lands on the
+    schema's own default ("owner") unless overridden here. Every route that
+    a shared viewer/editor can reach needs to override it explicitly, or
+    they'd see themselves as the owner of someone else's diagram."""
+    return DiagramOut.model_validate(diagram).model_copy(update={"access": access})
 
 
 @router.get("/diagrams/{diagram_id}", response_model=DiagramOut)
@@ -141,7 +142,8 @@ async def get_diagram(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _get(db, user, diagram_id)
+    diagram, access = await diagram_access(db, user, diagram_id)
+    return _out(diagram, access)
 
 
 @router.patch("/diagrams/{diagram_id}", response_model=DiagramOut)
@@ -151,7 +153,7 @@ async def update_diagram(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    diagram = await _get(db, user, diagram_id)
+    diagram, access = await diagram_access(db, user, diagram_id, require_edit=True)
 
     if payload.title is not None:
         diagram.title = payload.title
@@ -160,6 +162,11 @@ async def update_diagram(
     if payload.is_favorite is not None:
         diagram.is_favorite = payload.is_favorite
     if "project_id" in payload.model_fields_set:
+        # Which project a diagram lives in is the owner's own filing, not
+        # something a shared editor should be able to move out from under
+        # them — everything else in this route is fair game for an editor.
+        if access != "owner":
+            raise HTTPException(403, "Only the owner can move a diagram between projects.")
         if payload.project_id is not None:
             owned = (
                 await db.execute(
@@ -190,7 +197,7 @@ async def update_diagram(
 
     await db.commit()
     await db.refresh(diagram)
-    return diagram
+    return _out(diagram, access)
 
 
 @router.delete("/diagrams/{diagram_id}", status_code=204)
@@ -199,9 +206,81 @@ async def delete_diagram(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    diagram = await _get(db, user, diagram_id)
+    # Deliberately not diagram_access: deleting is an owner-only action even
+    # for someone the diagram was shared with as an editor.
+    stmt = select(Diagram).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
+    diagram = (await db.execute(stmt)).scalar_one_or_none()
+    if not diagram:
+        raise HTTPException(404, "Diagram not found.")
     await db.delete(diagram)
     await db.commit()
+
+
+# --------------------------------------------------------------------------
+# Sharing — one link, one role, per diagram
+# --------------------------------------------------------------------------
+
+
+@router.post("/diagrams/{diagram_id}/share", response_model=DiagramOut)
+async def share_diagram(
+    diagram_id: uuid.UUID,
+    payload: ShareUpdate,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Turns sharing on (or changes the role of an existing share) — owner
+    only. Reuses the existing token if the diagram is already shared, so
+    flipping Viewer <-> Editor doesn't invalidate a link people already
+    have."""
+    stmt = select(Diagram).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
+    diagram = (await db.execute(stmt)).scalar_one_or_none()
+    if not diagram:
+        raise HTTPException(404, "Diagram not found.")
+    if not diagram.share_token:
+        diagram.share_token = secrets.token_urlsafe(24)
+    diagram.share_role = payload.role.value
+    await db.commit()
+    await db.refresh(diagram)
+    return _out(diagram, "owner")
+
+
+@router.delete("/diagrams/{diagram_id}/share", response_model=DiagramOut)
+async def unshare_diagram(
+    diagram_id: uuid.UUID,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revokes the link — owner only. Clears the token itself, not just the
+    role, so a previously-shared link can never be reactivated by guessing;
+    sharing again issues a fresh one."""
+    stmt = select(Diagram).where(Diagram.id == diagram_id, Diagram.owner_id == user.id)
+    diagram = (await db.execute(stmt)).scalar_one_or_none()
+    if not diagram:
+        raise HTTPException(404, "Diagram not found.")
+    diagram.share_token = None
+    diagram.share_role = None
+    await db.commit()
+    await db.refresh(diagram)
+    return _out(diagram, "owner")
+
+
+@router.get("/diagrams/shared/{token}", response_model=DiagramOut)
+async def open_shared_diagram(
+    token: str,
+    user: User = Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What a share link resolves to — any signed-in account, not just the
+    owner's team members. A revoked or never-valid token 404s the same way
+    an unknown diagram id does."""
+    stmt = select(Diagram).where(Diagram.share_token == token)
+    diagram = (await db.execute(stmt)).scalar_one_or_none()
+    if not diagram or not diagram.share_role:
+        raise HTTPException(404, "That link isn't valid anymore.")
+    # The owner following their own share link still gets full access, not
+    # a downgrade to whatever role they last set it to.
+    access = "owner" if diagram.owner_id == user.id else diagram.share_role
+    return _out(diagram, access)
 
 
 # --------------------------------------------------------------------------
@@ -215,7 +294,7 @@ async def list_versions(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get(db, user, diagram_id)  # 404s unless the caller owns it
+    await diagram_access(db, user, diagram_id)  # 404s unless owned or shared
     stmt = (
         select(DiagramVersion)
         .where(DiagramVersion.diagram_id == diagram_id)
@@ -231,7 +310,7 @@ async def restore_version(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    diagram = await _get(db, user, diagram_id)
+    diagram, access = await diagram_access(db, user, diagram_id, require_edit=True)
     stmt = select(DiagramVersion).where(
         DiagramVersion.diagram_id == diagram_id, DiagramVersion.version == version
     )
@@ -252,7 +331,7 @@ async def restore_version(
     diagram.data = snapshot.data
     await db.commit()
     await db.refresh(diagram)
-    return diagram
+    return _out(diagram, access)
 
 
 # --------------------------------------------------------------------------
@@ -266,7 +345,7 @@ async def list_messages(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get(db, user, diagram_id)  # 404s unless the caller owns it
+    await diagram_access(db, user, diagram_id)  # 404s unless owned or shared
     stmt = (
         select(DiagramMessage)
         .where(DiagramMessage.diagram_id == diagram_id)
@@ -284,7 +363,7 @@ async def add_message(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get(db, user, diagram_id)
+    await diagram_access(db, user, diagram_id, require_edit=True)
     msg = DiagramMessage(diagram_id=diagram_id, **payload.model_dump())
     db.add(msg)
     await db.commit()
@@ -300,7 +379,7 @@ async def clear_messages(
 ):
     """What /new calls — clears the chat thread, leaves the diagram itself
     untouched."""
-    await _get(db, user, diagram_id)
+    await diagram_access(db, user, diagram_id, require_edit=True)
     await db.execute(delete(DiagramMessage).where(DiagramMessage.diagram_id == diagram_id))
     await db.commit()
 
