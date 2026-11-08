@@ -45,21 +45,30 @@ function mixToward(rgb: [number, number, number], target: number, amount: number
   return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
 }
 
+/** A diagram family's accent at full strength: the hue as the fill, a darker
+ *  shade of it for the border, white text — the same treatment as the named
+ *  swatches in NODE_COLORS, so a default shape and a picked colour look
+ *  alike. Never a pale tint of the hue. */
+function solid(fill: string): ResolvedColor {
+  const rgb = hexRgb(fill) ?? [0, 0, 0];
+  return { bg: fill, line: mixToward(rgb, 0, 0.35), ink: "#ffffff" };
+}
+
 /** Each diagram family gets its own laid-back accent palette, so a process
  *  flow, an org chart and a network read as different "worlds" at a glance
  *  even before you look at the shapes. Only applies when the user hasn't
  *  pinned an explicit colour on the node. */
 export const TYPE_DEFAULT: Record<string, ResolvedColor> = {
-  process_flow: { bg: "#f2effc", line: "#7a6be0", ink: "#2c2360" },
-  swimlane: { bg: "#eef3fc", line: "#4f7fce", ink: "#22406f" },
-  architecture: { bg: "#eef1f6", line: "#4f637c", ink: "#1f2c3d" },
-  network: { bg: "#e6f3f4", line: "#2b8a94", ink: "#145760" },
-  sequence: { bg: "#f8f0de", line: "#b0781f", ink: "#5c3f0c" },
-  er: { bg: "#fae9f1", line: "#b84b78", ink: "#5c213e" },
-  data_flow: { bg: "#e2f4ec", line: "#1d9a6c", ink: "#10503a" },
-  org_chart: { bg: "#faece3", line: "#c1763a", ink: "#5c2e0e" },
-  mind_map: { bg: "#fae8e6", line: "#c6574f", ink: "#5c201b" },
-  tree: { bg: "#e5f3ec", line: "#1f9d6e", ink: "#0f4b34" },
+  process_flow: solid("#6d4fe0"),
+  swimlane: solid("#2f6fe0"),
+  architecture: solid("#3d5a80"),
+  network: solid("#0f97a6"),
+  sequence: solid("#d4890f"),
+  er: solid("#d63f86"),
+  data_flow: solid("#0d9f6e"),
+  org_chart: solid("#ea6f1c"),
+  mind_map: solid("#e0383a"),
+  tree: solid("#10a46e"),
 };
 
 /** Kinds that adopt the family accent — the "meat" boxes. The rest stay

@@ -1,433 +1,647 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import type { DiagramType } from "../api/types";
 import {
-  ArrowRight,
+  Check,
   CheckCircle,
   ChevronDown,
   FileImage,
   LinkIcon,
   LogoMark,
   Printer,
-  Sparkles,
 } from "../components/icons";
 import { TYPE_LABEL, TypeGlyph, tintFor } from "../components/templateVisuals";
-import { ThemeToggle } from "../components/ThemeToggle";
+import { ThemeIconButton } from "../components/ThemeToggle";
+import { COPY, saveLang, storedLang, type Lang, type LandingCopy } from "./landing/copy";
 import { DemoCanvas } from "./landing/DemoCanvas";
-import { ORDER_FLOW, SHOWCASE } from "./landing/demoDocs";
+import { SHOWCASE } from "./landing/demoDocs";
+import { FlagKH, FlagUK } from "./landing/Flags";
+import { HeroDemo } from "./landing/HeroDemo";
+import { PipelineFlow } from "./landing/PipelineFlow";
+import { TemplateBrowser } from "./landing/TemplateBrowser";
 
-const PROMPT = "Draw an order flow: check stock, charge the card, or tell the customer it's out.";
-/** Animation clock ticks at 40ms: type the prompt, draw a shape every
- *  REVEAL_EVERY ticks, then hold the finished diagram before looping. */
-const TICK_MS = 40;
-const REVEAL_EVERY = 11;
-const LEAD = 10;
-const HOLD = 100;
+/* Design notes (frontend-design pass)
+ * - Palette: neutral paper, navy ink, teal for actions, brand red for AI and
+ *   attention. Colour, where used, is a solid fill.
+ * - Plus Jakarta Sans for English headings and body; Khmer falls through to
+ *   Kantumruy Pro, a Cambodian face that sets Khmer and Latin.
+ * - Sections are left-aligned: heading, then content. No card grids.
+ * - The hero demo drawing itself is the one piece of motion that plays
+ *   without being asked; the pipeline below is interactive. */
 
-const FAQ = [
-  {
-    q: "Do I have to draw anything myself?",
-    a: "No. Describe the process or system in a sentence and Kumnous AI places the shapes and connectors. You can still drag, restyle and rewire anything afterwards.",
-  },
-  {
-    q: "Can I change a diagram after it's drawn?",
-    a: "Yes, two ways. Edit directly on the canvas, or ask the copilot, for example “add a manager approval before the card is charged”, and it edits the diagram in place.",
-  },
-  {
-    q: "What diagram types are supported?",
-    a: "Process flows, swimlanes, architecture, network, sequence, entity-relationship, data flow, org charts, mind maps, trees and circle diagrams. There are ready-made templates for the common ones.",
-  },
-  {
-    q: "How do I get a diagram out of Kumnous?",
-    a: "Export it as PNG, SVG or PDF, or send a share link so someone else can open it.",
-  },
-  {
-    q: "Does it work in dark mode?",
-    a: "Yes. The whole app, including the canvas and every shape, follows light, dark or your system setting.",
-  },
-];
+// Plus Jakarta Sans for English, headings and body alike; it has no Khmer, so
+// Khmer text falls through to Kantumruy Pro.
+const DISPLAY = "[font-family:'Plus_Jakarta_Sans','Kantumruy_Pro',sans-serif]";
+const BODY = "[font-family:'Plus_Jakarta_Sans','Kantumruy_Pro',sans-serif]";
+const FOCUS =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green";
+const PRIMARY = `inline-flex items-center rounded-lg bg-green px-5 py-3 text-[15px] font-medium text-on-accent no-underline transition-[background-color,translate] hover:-translate-y-0.5 hover:bg-green-strong ${FOCUS}`;
+const WRAP = "mx-auto w-[min(1120px,calc(100%-40px))]";
 
 const TYPES = Object.keys(TYPE_LABEL) as DiagramType[];
 
-function Eyebrow({ children }: { children: string }) {
-  return (
-    <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-green">
-      {children}
-    </span>
-  );
-}
+/** Where "Contact us" on the Enterprise plan goes. Empty sends people to
+ *  sign-up instead, so the button never points at a made-up address. */
+const SALES_EMAIL = "";
 
-function SectionTitle({ eyebrow, children }: { eyebrow: string; children: string }) {
-  return (
-    <div className="mb-10 text-center">
-      <Eyebrow>{eyebrow}</Eyebrow>
-      <h2 className="m-0 mt-2.5 text-[34px] font-semibold leading-[1.15] tracking-[-0.025em] text-ink-strong max-[560px]:text-[26px]">
-        {children}
-      </h2>
-    </div>
-  );
-}
+/** Yearly billing takes this much off the monthly price. */
+const YEARLY_DISCOUNT = 0.2;
 
-function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+/** Prices per plan, in the same order as the copy's plans; Pro is index 1. */
+const PLAN_PRICES = [0, 6, 10];
+const RECOMMENDED_PLAN = 1;
+
+/** Rises its contents in the first time they scroll into view; `delay`
+ *  staggers siblings. Reduced motion shows them straight away (see
+ *  `.lp-reveal` in tailwind.css). */
+export function Reveal({ children, delay = 0, className = "" }: { children: ReactNode; delay?: number; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(query.matches);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
+    const el = ref.current;
+    if (!el) return;
+    if (!("IntersectionObserver" in window)) {
+      setShown(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setShown(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.15 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
-  return reduced;
+  return (
+    <div
+      ref={ref}
+      className={`lp-reveal ${shown ? "is-in" : ""} ${className}`}
+      style={{ "--d": `${delay}s` } as React.CSSProperties}
+    >
+      {children}
+    </div>
+  );
 }
 
-/** The product, working: a prompt types into the copilot panel and the
- *  diagram draws itself on the real canvas, shape by shape. */
-function HeroDemo() {
-  const reduced = usePrefersReducedMotion();
-  const total = ORDER_FLOW.nodes.length;
-  const endTick = PROMPT.length + LEAD + total * REVEAL_EVERY + HOLD;
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (reduced) return;
-    const id = window.setInterval(() => setTick((t) => (t + 1 >= endTick ? 0 : t + 1)), TICK_MS);
-    return () => window.clearInterval(id);
-  }, [reduced, endTick]);
-
-  const typed = reduced ? PROMPT.length : Math.min(PROMPT.length, tick);
-  const revealed = reduced
-    ? total
-    : Math.max(0, Math.min(total, Math.floor((tick - PROMPT.length - LEAD) / REVEAL_EVERY) + 1));
-  const done = revealed >= total;
-
+function SectionHeading({ title, intro }: { title: string; intro?: string }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-line bg-surface shadow-3">
-      <div className="flex items-center gap-2.5 border-b border-line px-3.5 py-2.5">
-        <span className="grid size-[22px] place-items-center rounded-md bg-[linear-gradient(135deg,var(--green),var(--green-deep))] text-on-accent [&_svg]:size-[13px]">
-          <LogoMark />
-        </span>
-        <span className="text-[12.5px] font-semibold text-ink-strong">{ORDER_FLOW.title}</span>
-        <span className="rounded-full bg-violet-soft px-2 py-0.5 text-[10.5px] font-medium text-slate">
-          Process
-        </span>
-        <span className="ml-auto flex gap-1.5 text-[11.5px] font-medium">
-          <span className="rounded-md border border-line px-2.5 py-1 text-slate">Share</span>
-          <span className="rounded-md border border-line px-2.5 py-1 text-slate">Export</span>
-        </span>
+    <Reveal>
+      <h2
+        className={`${DISPLAY} m-0 text-[32px] font-semibold leading-[1.3] tracking-[-0.015em] text-ink-strong max-[560px]:text-[26px]`}
+      >
+        {title}
+      </h2>
+      {intro && <p className="mb-0 mt-3 max-w-[62ch] text-[15px] leading-[1.7] text-slate">{intro}</p>}
+    </Reveal>
+  );
+}
+
+/** Heading on the left, content on the right; stacks on narrow screens. */
+function Section({
+  id,
+  title,
+  intro,
+  children,
+}: {
+  id?: string;
+  title: string;
+  intro?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className={`${WRAP} scroll-mt-20 border-t border-line py-20 max-[860px]:py-14`}>
+      <div className="grid grid-cols-[300px_1fr] gap-12 max-[960px]:grid-cols-1 max-[960px]:gap-8">
+        <div>
+          <SectionHeading title={title} intro={intro} />
+        </div>
+        <div className="min-w-0">{children}</div>
       </div>
+    </section>
+  );
+}
 
-      <div className="grid h-[400px] grid-cols-[1fr_232px] max-[760px]:h-auto max-[760px]:grid-cols-1">
-        <div className="h-[400px] min-w-0 border-r border-line max-[760px]:h-[300px] max-[760px]:border-b max-[760px]:border-r-0">
-          <DemoCanvas doc={ORDER_FLOW} revealed={revealed} />
-        </div>
-
-        <div className="flex flex-col gap-3 bg-surface-2 p-3.5 max-[760px]:min-h-[190px]">
-          <div className="flex items-center gap-2 text-[12px] font-semibold text-ink-strong">
-            <span className="grid size-5 place-items-center rounded-full bg-green-soft text-green [&_svg]:size-3">
-              <Sparkles />
-            </span>
-            Kumnous AI
-          </div>
-          <p className="m-0 min-h-[78px] rounded-xl rounded-tr-sm border border-line bg-surface px-3 py-2.5 text-[12.5px] leading-[1.5] text-ink">
-            {PROMPT.slice(0, typed)}
-            {typed < PROMPT.length && (
-              <span className="ml-px inline-block h-[13px] w-px translate-y-[2px] animate-pulse bg-ink" />
-            )}
-          </p>
-          {typed >= PROMPT.length && (
-            <p className="m-0 flex items-start gap-2 text-[12px] leading-[1.5] text-slate">
-              <span
-                className={`mt-px shrink-0 [&_svg]:size-3.5 ${done ? "text-green" : "text-slate-soft"}`}
-              >
-                {done ? <CheckCircle /> : <Sparkles />}
-              </span>
-              {done
-                ? `Drew ${total} shapes and ${ORDER_FLOW.edges.length} connectors.`
-                : `Drawing… ${revealed} of ${total}`}
-            </p>
-          )}
-        </div>
+function ForYourTeam({ label, points }: { label: string; points: { title: string; body: string }[] }) {
+  return (
+    <div className="mt-12 border-t border-line pt-6">
+      <h3 className="m-0 flex items-center gap-2 text-[14px] font-semibold text-ink-strong">
+        <span className="h-3.5 w-[3px] rounded-full bg-brand-red" />
+        {label}
+      </h3>
+      <div className="mt-4 grid grid-cols-3 gap-8 max-[760px]:grid-cols-1 max-[760px]:gap-5">
+        {points.map((point, i) => (
+          <Reveal key={point.title} delay={i * 0.1}>
+            <p className="m-0 text-[15px] font-medium text-ink-strong">{point.title}</p>
+            <p className="mb-0 mt-1.5 text-[14px] leading-[1.7] text-slate">{point.body}</p>
+          </Reveal>
+        ))}
       </div>
     </div>
   );
 }
 
-function Showcase() {
+const LANGUAGES: { value: Lang; name: string; flag: ReactNode }[] = [
+  { value: "en", name: "English", flag: <FlagUK /> },
+  { value: "km", name: "ខ្មែរ", flag: <FlagKH /> },
+];
+
+/** Language dropdown: the current flag and name, a chevron, and a short menu
+ *  of the other choices. Closes on Escape or a press outside it. */
+export function LanguageMenu({ lang, onChange, label }: { lang: Lang; onChange: (lang: Lang) => void; label: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = LANGUAGES.find((l) => l.value === lang) ?? LANGUAGES[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex h-10 cursor-pointer items-center gap-2 rounded-full border border-line bg-surface px-3.5 text-[14px] font-medium text-ink-strong transition-colors hover:bg-surface-2 ${FOCUS}`}
+      >
+        {current.flag}
+        <span lang={current.value}>{current.name}</span>
+        <span className={`text-slate transition-transform [&_svg]:size-3.5 ${open ? "rotate-180" : ""}`}>
+          <ChevronDown />
+        </span>
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          aria-label={label}
+          className="absolute right-0 top-[calc(100%+6px)] z-50 m-0 min-w-[170px] list-none rounded-xl border border-line bg-surface p-1 shadow-3 animate-[menu-in_130ms_ease]"
+        >
+          {LANGUAGES.map((option) => (
+            <li key={option.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === lang}
+                lang={option.value}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border-0 px-3 py-2 text-left text-[14px] ${FOCUS} ${
+                  option.value === lang
+                    ? "bg-green font-medium text-on-accent"
+                    : "bg-transparent text-ink hover:bg-surface-2"
+                }`}
+              >
+                {option.flag}
+                {option.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export function Examples({ copy }: { copy: LandingCopy["examples"] }) {
   const [active, setActive] = useState<(typeof SHOWCASE)[number]["id"]>("flow");
   const current = SHOWCASE.find((s) => s.id === active) ?? SHOWCASE[0];
 
   return (
-    <div className="grid grid-cols-[260px_1fr] gap-8 max-[860px]:grid-cols-1">
-      <div className="flex flex-col gap-1.5">
+    <div>
+      <div className="flex flex-wrap gap-1 border-b border-line" role="tablist" aria-label={copy.title}>
         {SHOWCASE.map((item) => (
           <button
             key={item.id}
             type="button"
+            role="tab"
+            aria-selected={active === item.id}
             onClick={() => setActive(item.id)}
-            aria-pressed={active === item.id}
-            className={`cursor-pointer rounded-xl border px-4 py-3 text-left transition-colors ${
-              active === item.id
-                ? "border-green-line bg-green-soft"
-                : "border-transparent bg-transparent hover:bg-surface"
+            className={`-mb-px cursor-pointer border-0 border-b-2 border-solid bg-transparent px-3 py-2.5 text-[14px] font-medium transition-colors ${FOCUS} ${
+              active === item.id ? "border-brand-red text-ink-strong" : "border-transparent text-slate hover:text-ink-strong"
             }`}
           >
-            <span className="block text-[14px] font-semibold text-ink-strong">{item.label}</span>
-            {active === item.id && (
-              <span className="mt-1 block text-[12.5px] leading-[1.5] text-slate">{item.blurb}</span>
-            )}
+            {copy.tabs[item.id].label}
           </button>
         ))}
       </div>
-      <div className="h-[380px] overflow-hidden rounded-2xl border border-line shadow-2">
-        <DemoCanvas doc={current.doc} />
+      <p className="mb-0 mt-4 max-w-[60ch] text-[15px] leading-[1.7] text-slate">{copy.tabs[current.id].blurb}</p>
+      <div className="mt-5 h-[560px] overflow-hidden rounded-[14px] border border-line-strong max-[760px]:h-[420px]">
+        <DemoCanvas doc={current.doc} explore hints={{ explore: copy.dragExplore, move: copy.dragMove }} />
       </div>
     </div>
   );
 }
 
-function FaqItem({ q, a }: { q: string; a: string }) {
+/** One editor capability per row: what it does on the left, a piece of the
+ *  real interface on the right. */
+function FeatureRow({ title, body, children }: { title: string; body: string; children: ReactNode }) {
+  return (
+    <Reveal>
+    <div className="grid grid-cols-[minmax(0,5fr)_minmax(0,7fr)] items-start gap-8 border-b border-line py-8 first:pt-0 max-[760px]:grid-cols-1 max-[760px]:gap-4">
+      <div>
+        <h3 className={`${DISPLAY} m-0 text-[21px] font-semibold leading-[1.4] text-ink-strong`}>{title}</h3>
+        <p className="mb-0 mt-2 text-[15px] leading-[1.7] text-slate">{body}</p>
+      </div>
+      <div>{children}</div>
+    </div>
+    </Reveal>
+  );
+}
+
+export function Pricing({ copy, signUp }: { copy: LandingCopy["pricing"]; signUp: string }) {
+  const [yearly, setYearly] = useState(true);
+  const price = (monthly: number) => {
+    const value = yearly ? monthly * (1 - YEARLY_DISCOUNT) : monthly;
+    return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+  };
+
+  return (
+    <div>
+      <div className="inline-flex rounded-lg border border-line bg-surface p-1" role="group" aria-label={copy.title}>
+        {[
+          { value: false, label: copy.monthly },
+          { value: true, label: copy.yearly(YEARLY_DISCOUNT * 100) },
+        ].map((option) => (
+          <button
+            key={option.label}
+            type="button"
+            aria-pressed={yearly === option.value}
+            onClick={() => setYearly(option.value)}
+            className={`cursor-pointer rounded-md border-0 px-4 py-1.5 text-[14px] font-medium transition-colors ${FOCUS} ${
+              yearly === option.value ? "bg-green text-on-accent" : "bg-transparent text-slate hover:text-ink-strong"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-6 grid grid-cols-3 items-start gap-4 max-[860px]:grid-cols-1">
+        {copy.plans.map((plan, i) => {
+          const highlight = i === RECOMMENDED_PLAN;
+          const monthly = PLAN_PRICES[i];
+          return (
+            <Reveal key={plan.name} delay={i * 0.1}>
+            <div
+              className={`flex flex-col rounded-xl bg-surface p-6 transition-[translate,box-shadow] duration-300 hover:-translate-y-1 hover:shadow-3 ${
+                highlight ? "border-2 border-solid border-green" : "border border-line"
+              }`}
+            >
+              <p className="m-0 h-[20px] text-[13px] font-medium text-brand-red">{highlight ? copy.recommended : ""}</p>
+              <h3 className={`${DISPLAY} m-0 mt-1 text-[21px] font-semibold text-ink-strong`}>{plan.name}</h3>
+              <p className="mb-0 mt-1 min-h-[72px] text-[14px] leading-[1.6] text-slate">{plan.blurb}</p>
+              <p className="mb-0 mt-5 flex flex-wrap items-baseline gap-2">
+                <span className={`${DISPLAY} text-[40px] font-semibold leading-none tracking-[-0.02em] text-ink-strong`}>
+                  {price(monthly)}
+                </span>
+                {plan.unit && <span className="text-[13.5px] text-slate">{plan.unit}</span>}
+              </p>
+              <p className="mb-0 mt-2 min-h-[20px] text-[12.5px] text-slate-soft">
+                {monthly > 0 && yearly ? copy.billedYearly(monthly) : ""}
+              </p>
+              <Link
+                to="/register"
+                className={`mt-5 rounded-lg px-4 py-2.5 text-center text-[14px] font-medium no-underline transition-colors ${FOCUS} ${
+                  highlight
+                    ? "bg-green text-on-accent hover:bg-green-strong"
+                    : "border border-line-strong text-ink-strong hover:border-green"
+                }`}
+              >
+                {plan.cta}
+              </Link>
+              <ul className="m-0 mt-6 flex list-none flex-col gap-2.5 p-0 text-[14px] text-ink">
+                {plan.features.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2.5 leading-[1.6]">
+                    <span className="mt-0.5 shrink-0 text-green [&_svg]:size-4">
+                      <Check />
+                    </span>
+                    {feature}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            </Reveal>
+          );
+        })}
+      </div>
+
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-6">
+        <div>
+          <h3 className={`${DISPLAY} m-0 text-[21px] font-semibold text-ink-strong`}>{copy.enterprise.title}</h3>
+          <p className="mb-0 mt-1.5 max-w-[60ch] text-[14px] leading-[1.7] text-slate">{copy.enterprise.body}</p>
+        </div>
+        {SALES_EMAIL ? (
+          <a
+            href={`mailto:${SALES_EMAIL}`}
+            className={`rounded-lg border border-line-strong px-5 py-2.5 text-[14px] font-medium text-ink-strong no-underline hover:border-green ${FOCUS}`}
+          >
+            {copy.enterprise.contact}
+          </a>
+        ) : (
+          <Link
+            to="/register"
+            className={`rounded-lg border border-line-strong px-5 py-2.5 text-[14px] font-medium text-ink-strong no-underline hover:border-green ${FOCUS}`}
+          >
+            {signUp}
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function FaqItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="border-b border-line last:border-b-0">
+    <div className="border-b border-line">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full cursor-pointer items-center justify-between gap-4 border-0 bg-transparent px-5 py-4 text-left text-[14px] font-semibold text-ink-strong"
+        className={`flex w-full cursor-pointer items-center justify-between gap-4 border-0 bg-transparent py-5 text-left text-[16px] font-medium leading-[1.6] text-ink-strong ${FOCUS}`}
       >
         {q}
-        <span
-          className={`shrink-0 text-slate transition-transform [&_svg]:size-4 ${open ? "rotate-180" : ""}`}
-        >
+        <span className={`shrink-0 text-slate transition-transform [&_svg]:size-4 ${open ? "rotate-180" : ""}`}>
           <ChevronDown />
         </span>
       </button>
-      {open && <p className="m-0 px-5 pb-5 text-[13.5px] leading-[1.65] text-slate">{a}</p>}
+      {open && <p className="m-0 max-w-[64ch] pb-5 text-[15px] leading-[1.75] text-slate">{a}</p>}
     </div>
   );
 }
 
-const CARD = "rounded-2xl border border-line bg-surface p-6";
-
 /** Public marketing page shown at `/` to signed-out visitors. */
 export default function Landing() {
+  const [lang, setLang] = useState<Lang>(storedLang);
+  const t = COPY[lang];
+  const km = lang === "km";
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    saveLang(lang);
+  }, [lang]);
+
+  // Khmer stacks vowels and subscripts above and below the line, so it needs
+  // more leading than Latin; the headline's connector follows the same line
+  // height so its arrow still lands on line two.
+  const lh = km ? 1.45 : 1.1;
+  const portY = lh * 0.5;
+  const arrowY = lh * 1.5 + 0.08;
+
   return (
-    <div className="min-h-screen scroll-smooth bg-paper text-ink">
-      <header className="sticky top-3 z-30 mx-auto mt-3 flex w-[min(1080px,calc(100%-24px))] items-center justify-between rounded-2xl border border-line bg-surface/85 px-4 py-2.5 shadow-2 backdrop-blur">
-        <a href="#top" className="flex items-center gap-2.5 no-underline">
-          <span className="grid size-[26px] place-items-center rounded-lg bg-[linear-gradient(135deg,var(--green),var(--green-deep))] text-on-accent [&_svg]:size-[15px]">
-            <LogoMark />
-          </span>
-          <span className="text-[14.5px] font-semibold tracking-[-0.01em] text-ink-strong">
-            Kumnous-គំនូស
-          </span>
-        </a>
-        <nav className="flex items-center gap-5 text-[13px] font-medium text-slate">
-          <a href="#see-it" className="no-underline hover:text-ink-strong max-[760px]:hidden">
-            See it
+    <div className={`relative isolate min-h-screen bg-paper text-ink ${BODY}`}>
+      {/* Faint drafting grid behind the whole page, fixed while it scrolls:
+          clearest at the top, fading towards the bottom of the screen. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 -z-10 [background-image:linear-gradient(color-mix(in_srgb,var(--line-strong)_55%,transparent)_1px,transparent_1px),linear-gradient(90deg,color-mix(in_srgb,var(--line-strong)_55%,transparent)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:linear-gradient(to_bottom,black_0%,rgba(0,0,0,0.55)_55%,rgba(0,0,0,0.25)_100%)]"
+      />
+      {/* A floating rounded bar: one font, 14px text, and 40px controls
+          (round icon button, outlined Log in, solid call to action). */}
+      <header className="sticky top-0 z-30 px-5 pt-3 max-[560px]:px-3">
+        <div className="mx-auto flex h-16 w-[min(1180px,100%)] items-center justify-between gap-4 rounded-2xl border border-line bg-surface/90 pl-5 pr-2.5 text-[14px] shadow-2 backdrop-blur">
+          <a href="#top" className={`flex shrink-0 items-center gap-2.5 rounded-md no-underline ${FOCUS}`}>
+            <span className="grid size-8 place-items-center rounded-lg bg-green text-on-accent [&_svg]:size-4">
+              <LogoMark />
+            </span>
+            <span className="text-[16px] font-semibold text-ink-strong">Kumnous-គំនូស</span>
           </a>
-          <a href="#types" className="no-underline hover:text-ink-strong max-[760px]:hidden">
-            Diagram types
-          </a>
-          <a href="#faq" className="no-underline hover:text-ink-strong max-[760px]:hidden">
-            FAQ
-          </a>
-          <span className="max-[560px]:hidden">
-            <ThemeToggle />
-          </span>
-          <Link to="/login" className="no-underline hover:text-ink-strong">
-            Log in
-          </Link>
-          <Link
-            to="/register"
-            className="rounded-lg bg-green px-3.5 py-1.5 text-on-accent no-underline hover:bg-green-strong"
-          >
-            Get started
-          </Link>
-        </nav>
+          <nav className="flex items-center gap-8 text-[15px] font-medium text-ink max-[1180px]:gap-6 max-[1040px]:hidden">
+            {[
+              { href: "#how-it-works", label: t.nav.how },
+              { href: "#examples", label: t.nav.examples },
+              { href: "#pricing", label: t.nav.pricing },
+              { href: "#faq", label: t.nav.faq },
+            ].map((item) => (
+              <a key={item.href} href={item.href} className={`rounded-sm no-underline hover:text-green ${FOCUS}`}>
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="max-[640px]:hidden">
+              <LanguageMenu lang={lang} onChange={setLang} label={t.lang.label} />
+            </span>
+            <ThemeIconButton labels={t.theme} className="size-10 rounded-full" />
+            <Link
+              to="/login"
+              className={`inline-flex h-10 items-center rounded-xl border border-line-strong bg-surface px-4 font-medium text-ink-strong no-underline hover:bg-surface-2 ${FOCUS}`}
+            >
+              {t.nav.login}
+            </Link>
+            <Link
+              to="/register"
+              className={`inline-flex h-10 items-center rounded-xl bg-green px-4 font-semibold text-on-accent no-underline shadow-2 hover:bg-green-strong max-[480px]:hidden ${FOCUS}`}
+            >
+              {t.nav.startFree}
+            </Link>
+          </div>
+        </div>
       </header>
 
       <main id="top">
-        <section className="relative">
+        <section className={`${WRAP} pb-16 pt-20 max-[560px]:pt-12`}>
+          {/* The headline is a two-step flow: a port, an elbow connector and
+              an arrowhead join line one to line two, drawn the way the
+              editor draws its connectors. Sized in em so it scales with
+              the type. */}
+          <h1
+            className={`${DISPLAY} relative m-0 pl-[0.62em] font-semibold tracking-[-0.02em] text-ink-strong ${
+              km
+                ? "text-[48px] max-[760px]:text-[34px] max-[420px]:text-[28px]"
+                : "text-[60px] max-[760px]:text-[40px] max-[420px]:text-[32px]"
+            }`}
+            style={{ lineHeight: lh }}
+          >
+            <span
+              aria-hidden="true"
+              className="lp-pop absolute left-0 size-[0.2em] -translate-y-1/2 rounded-full border-[0.035em] border-solid border-[#5B6B76] bg-paper"
+              style={{ top: `${portY}em`, "--d": "0.25s" } as React.CSSProperties}
+            />
+            <span
+              aria-hidden="true"
+              className="lp-grow-y absolute left-[0.1em] w-[0.035em] -translate-x-1/2 bg-[#5B6B76]"
+              style={{ top: `${portY + 0.1}em`, height: `${arrowY - portY - 0.1}em`, "--d": "0.4s" } as React.CSSProperties}
+            />
+            <span
+              aria-hidden="true"
+              className="lp-grow-x absolute left-[0.1em] h-[0.035em] w-[0.28em] -translate-y-1/2 bg-[#5B6B76]"
+              style={{ top: `${arrowY}em`, "--d": "0.75s" } as React.CSSProperties}
+            />
+            <span
+              aria-hidden="true"
+              className="lp-pop absolute left-[0.36em] size-0 -translate-y-1/2 border-y-[0.09em] border-l-[0.14em] border-solid border-y-transparent border-l-brand-red"
+              style={{ top: `${arrowY}em`, "--d": "0.92s" } as React.CSSProperties}
+            />
+            <span className="lp-rise block">{t.hero.line1}</span>
+            <span className="lp-rise block" style={{ "--d": "0.95s" } as React.CSSProperties}>
+              {t.hero.line2}
+            </span>
+          </h1>
+          <p
+            className="lp-rise mb-0 mt-6 max-w-[58ch] text-[18px] leading-[1.7] text-slate"
+            style={{ "--d": "1.1s" } as React.CSSProperties}
+          >
+            {t.hero.sub}
+          </p>
           <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-0 h-[560px] opacity-70 [background-image:radial-gradient(var(--dot)_1.2px,transparent_1.2px)] [background-size:24px_24px] [mask-image:linear-gradient(to_bottom,black,transparent)]"
-          />
-          <div className="relative mx-auto grid w-[min(1080px,calc(100%-24px))] grid-cols-[400px_1fr] items-center gap-10 pb-20 pt-16 max-[1000px]:grid-cols-1 max-[560px]:pt-10">
-            <div>
-              <Eyebrow>គំនូស · AI diagram editor</Eyebrow>
-              <h1 className="m-0 mt-3.5 text-[46px] font-semibold leading-[1.06] tracking-[-0.03em] text-ink-strong max-[560px]:text-[34px]">
-                Say what the process is. Get the diagram.
-              </h1>
-              <p className="mb-0 mt-5 text-[16px] leading-[1.65] text-slate">
-                Kumnous AI turns a sentence into an editable flowchart, architecture or data-flow
-                diagram, then keeps editing it with you, on a canvas built for the details.
-              </p>
-              <div className="mt-7 flex flex-wrap gap-3">
-                <Link
-                  to="/register"
-                  className="inline-flex items-center gap-2 rounded-xl bg-green px-5 py-3 text-[14px] font-medium text-on-accent no-underline shadow-2 hover:bg-green-strong [&_svg]:size-4"
-                >
-                  Start diagramming <ArrowRight />
-                </Link>
-                <a
-                  href="#see-it"
-                  className="rounded-xl border border-line-strong bg-surface px-5 py-3 text-[14px] font-medium text-ink-strong no-underline hover:border-green-line"
-                >
-                  See it work
-                </a>
-              </div>
-              <p className="mb-0 mt-6 flex items-center gap-2 text-[12.5px] text-slate-soft">
-                Exports to
-                {["PNG", "SVG", "PDF"].map((f) => (
-                  <span
-                    key={f}
-                    className="rounded-md border border-line bg-surface px-2 py-0.5 text-[11px] font-medium text-slate"
-                  >
-                    {f}
-                  </span>
-                ))}
-              </p>
-            </div>
-            <HeroDemo />
+            className="lp-rise mt-8 flex flex-wrap items-center gap-6"
+            style={{ "--d": "1.2s" } as React.CSSProperties}
+          >
+            <Link to="/register" className={PRIMARY}>
+              {t.nav.signUp}
+            </Link>
+            <a
+              href="#examples"
+              className={`rounded-sm text-[15px] font-medium text-ink-strong underline decoration-line-strong underline-offset-4 hover:decoration-green ${FOCUS}`}
+            >
+              {t.hero.seeExamples}
+            </a>
           </div>
+          <p className="lp-rise mb-0 mt-5 text-[14px] text-slate-soft" style={{ "--d": "1.25s" } as React.CSSProperties}>
+            {t.hero.small}
+          </p>
+
+          <div className="lp-rise mt-14" style={{ "--d": "1.35s" } as React.CSSProperties}>
+            <HeroDemo copy={t.demo} />
+          </div>
+          <ForYourTeam label={t.forYourTeam} points={t.impact.hero} />
         </section>
 
-        <section id="see-it" className="mx-auto w-[min(1080px,calc(100%-24px))] scroll-mt-24 py-16">
-          <SectionTitle eyebrow="See it">Real diagrams, drawn the way the editor draws them</SectionTitle>
-          <Showcase />
+        <section id="how-it-works" className={`${WRAP} scroll-mt-20 border-t border-line py-20 max-[860px]:py-14`}>
+          <SectionHeading title={t.how.title} intro={t.how.intro} />
+          <Reveal className="mt-8" delay={0.1}>
+            <PipelineFlow copy={t.how} />
+          </Reveal>
         </section>
 
-        <section className="mx-auto w-[min(1080px,calc(100%-24px))] py-16">
-          <SectionTitle eyebrow="Inside the editor">Built for the fiddly part, too</SectionTitle>
-          <div className="grid grid-cols-6 gap-4 max-[860px]:grid-cols-1">
-            <div className={`${CARD} col-span-3 max-[860px]:col-span-1`}>
-              <h3 className="m-0 text-[16px] font-semibold text-ink-strong">Edit by talking</h3>
-              <p className="mb-4 mt-1.5 text-[13.5px] leading-[1.6] text-slate">
-                Ask for a change in plain words. The copilot edits the diagram you already have
-                instead of starting over.
-              </p>
-              <div className="flex flex-col gap-2.5 rounded-xl bg-surface-2 p-3.5 text-[12.5px] leading-[1.5]">
-                <p className="m-0 self-end rounded-xl rounded-tr-sm border border-line bg-surface px-3 py-2 text-ink">
-                  Add a manager approval before the card is charged.
-                </p>
-                <p className="m-0 flex items-start gap-2 text-slate">
-                  <span className="mt-px text-green [&_svg]:size-3.5">
-                    <CheckCircle />
-                  </span>
-                  Added 1 step and re-routed 2 connectors.
-                </p>
-              </div>
-            </div>
+        <section id="examples" className={`${WRAP} scroll-mt-20 border-t border-line py-20 max-[860px]:py-14`}>
+          <SectionHeading title={t.examples.title} intro={t.examples.intro} />
+          <Reveal className="mt-8" delay={0.1}>
+            <TemplateBrowser copy={t.examples} fallback={<Examples copy={t.examples} />} />
+          </Reveal>
+          <ForYourTeam label={t.forYourTeam} points={t.impact.examples} />
+        </section>
 
-            <div className={`${CARD} col-span-3 max-[860px]:col-span-1`}>
-              <h3 className="m-0 text-[16px] font-semibold text-ink-strong">Notices what's off</h3>
-              <p className="mb-4 mt-1.5 text-[13.5px] leading-[1.6] text-slate">
-                Overlapping connectors, dead ends, missing branches. The copilot flags them and
-                offers a one-click fix.
+        <Section title={t.editor.title} intro={t.editor.intro}>
+          <FeatureRow title={t.editor.ask.title} body={t.editor.ask.body}>
+            <div lang="en" className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 text-[14px] leading-[1.5]">
+              <p className="m-0 self-end rounded-xl rounded-tr-sm bg-surface-2 px-3 py-2 text-ink">
+                Add a manager approval before the card is charged.
               </p>
-              <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 p-3.5 shadow-2">
-                <p className="m-0 flex-1 text-[12.5px] leading-[1.5] text-ink">
-                  This diagram has a couple of overlapping connectors. I can tidy the layout.
-                </p>
-                <span className="shrink-0 rounded-lg bg-green px-3 py-1.5 text-[12px] font-medium text-on-accent">
-                  Fix Layout
+              <p className="m-0 flex items-start gap-2 text-slate">
+                <span className="mt-0.5 text-green [&_svg]:size-4">
+                  <CheckCircle />
                 </span>
-              </div>
-            </div>
-
-            <div className={`${CARD} col-span-4 max-[860px]:col-span-1`} id="types">
-              <h3 className="m-0 text-[16px] font-semibold text-ink-strong">
-                {TYPES.length} diagram types
-              </h3>
-              <p className="mb-4 mt-1.5 text-[13.5px] leading-[1.6] text-slate">
-                Each type gets its own shapes and layout rules, so a sequence diagram doesn't look
-                like a flowchart.
+                Added 1 step and re-routed 2 connectors.
               </p>
-              <div className="flex flex-wrap gap-2">
-                {TYPES.map((type) => {
-                  const [bg, border, ink] = tintFor(type);
-                  return (
-                    <span
-                      key={type}
-                      className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12.5px] font-medium"
-                      style={{ background: bg, borderColor: border, color: ink }}
-                    >
-                      <TypeGlyph type={type} />
-                      {TYPE_LABEL[type]}
-                    </span>
-                  );
-                })}
-              </div>
             </div>
+          </FeatureRow>
 
-            <div className={`${CARD} col-span-2 max-[860px]:col-span-1`}>
-              <h3 className="m-0 text-[16px] font-semibold text-ink-strong">Share or export</h3>
-              <p className="mb-4 mt-1.5 text-[13.5px] leading-[1.6] text-slate">
-                Hand it off as an image, a document or a link.
+          <FeatureRow title={t.editor.missing.title} body={t.editor.missing.body}>
+            <div lang="en" className="flex items-center gap-4 rounded-xl border border-line bg-surface p-4">
+              <p className="m-0 flex-1 text-[14px] leading-[1.5] text-ink">
+                This diagram has a couple of overlapping connectors. I can tidy the layout.
               </p>
-              <div className="flex flex-col gap-2 text-[12.5px] font-medium text-ink [&_svg]:size-4 [&_svg]:text-slate">
-                {[
-                  { icon: <FileImage />, label: "PNG or SVG image" },
-                  { icon: <Printer />, label: "PDF handout" },
-                  { icon: <LinkIcon />, label: "Share link" },
-                ].map((row) => (
+              <span className="shrink-0 rounded-md bg-green px-3 py-1.5 text-[13px] font-medium text-on-accent">
+                Fix layout
+              </span>
+            </div>
+          </FeatureRow>
+
+          <FeatureRow title={t.editor.types.title(TYPES.length)} body={t.editor.types.body}>
+            <div className="flex flex-wrap gap-2">
+              {TYPES.map((type) => {
+                const [bg, border, ink] = tintFor(type);
+                return (
                   <span
-                    key={row.label}
-                    className="flex items-center gap-2.5 rounded-lg border border-line bg-surface-2 px-3 py-2"
+                    key={type}
+                    className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[13px] font-medium transition-[translate] hover:-translate-y-0.5"
+                    style={{ background: bg, borderColor: border, color: ink }}
                   >
-                    {row.icon}
-                    {row.label}
+                    <TypeGlyph type={type} />
+                    {TYPE_LABEL[type]}
                   </span>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          </div>
-        </section>
+          </FeatureRow>
 
-        <section id="faq" className="mx-auto w-[min(720px,calc(100%-24px))] scroll-mt-24 py-16">
-          <SectionTitle eyebrow="FAQ">Questions people ask</SectionTitle>
-          <div className="overflow-hidden rounded-2xl border border-line bg-surface">
-            {FAQ.map((item) => (
+          <FeatureRow title={t.editor.share.title} body={t.editor.share.body}>
+            <ul className="m-0 flex list-none flex-col gap-3 p-0 text-[14px] text-ink [&_svg]:size-4 [&_svg]:text-slate">
+              {[<FileImage key="i" />, <Printer key="p" />, <LinkIcon key="l" />].map((icon, i) => (
+                <li key={t.editor.share.rows[i]} className="flex items-center gap-3">
+                  {icon}
+                  {t.editor.share.rows[i]}
+                </li>
+              ))}
+            </ul>
+          </FeatureRow>
+
+          <ForYourTeam label={t.forYourTeam} points={t.impact.editor} />
+        </Section>
+
+        <Section id="pricing" title={t.pricing.title} intro={t.pricing.intro}>
+          <Pricing copy={t.pricing} signUp={t.nav.signUp} />
+          <ForYourTeam label={t.forYourTeam} points={t.impact.pricing} />
+        </Section>
+
+        <Section id="faq" title={t.faq.title}>
+          <Reveal className="border-t border-line">
+            {t.faq.items.map((item) => (
               <FaqItem key={item.q} {...item} />
             ))}
-          </div>
-        </section>
+          </Reveal>
+        </Section>
 
-        <section className="mx-auto w-[min(1080px,calc(100%-24px))] pb-20 pt-6">
-          <div className="rounded-3xl bg-[linear-gradient(135deg,var(--green),var(--green-deep))] px-6 py-14 text-center text-on-accent">
-            <h2 className="m-0 text-[30px] font-semibold tracking-[-0.025em] max-[560px]:text-[24px]">
-              Your next diagram is one sentence away.
-            </h2>
-            <Link
-              to="/register"
-              className="mt-7 inline-block rounded-xl bg-surface px-6 py-3 text-[14px] font-medium text-ink-strong no-underline"
-            >
-              Create an account
-            </Link>
-          </div>
+        <section className={`${WRAP} border-t border-line py-20`}>
+          <h2
+            className={`${DISPLAY} m-0 max-w-[22ch] text-[40px] font-semibold leading-[1.3] tracking-[-0.015em] text-ink-strong max-[560px]:text-[30px]`}
+          >
+            {t.closing.title}
+          </h2>
+          <p className="mb-0 mt-4 max-w-[58ch] text-[16px] leading-[1.7] text-slate">{t.closing.body}</p>
+          <Link to="/register" className={`${PRIMARY} mt-8`}>
+            {t.nav.signUp}
+          </Link>
         </section>
       </main>
 
       <footer className="border-t border-line">
-        <div className="mx-auto flex w-[min(1080px,calc(100%-24px))] flex-wrap items-center justify-between gap-3 py-6 text-[12.5px] text-slate">
+        <div className={`${WRAP} flex flex-wrap items-center justify-between gap-4 py-8 text-[14px] text-slate`}>
           <span className="flex items-center gap-2 font-semibold text-ink-strong">
-            <span className="grid size-[20px] place-items-center rounded-md bg-[linear-gradient(135deg,var(--green),var(--green-deep))] text-on-accent [&_svg]:size-3">
+            <span className="grid size-[22px] place-items-center rounded-md bg-green text-on-accent [&_svg]:size-3">
               <LogoMark />
             </span>
             Kumnous-គំនូស
           </span>
-          <span className="flex gap-5">
-            <a href="#faq" className="text-slate no-underline hover:text-ink-strong">
-              FAQ
+          <span className="flex gap-6">
+            <a href="#pricing" className={`rounded-sm text-slate no-underline hover:text-ink-strong ${FOCUS}`}>
+              {t.nav.pricing}
             </a>
-            <Link to="/login" className="text-slate no-underline hover:text-ink-strong">
-              Log in
-            </Link>
-            <Link to="/register" className="text-slate no-underline hover:text-ink-strong">
-              Register
+            <a href="#faq" className={`rounded-sm text-slate no-underline hover:text-ink-strong ${FOCUS}`}>
+              {t.nav.faq}
+            </a>
+            <Link to="/login" className={`rounded-sm text-slate no-underline hover:text-ink-strong ${FOCUS}`}>
+              {t.nav.login}
             </Link>
           </span>
           <span>© {new Date().getFullYear()} Kumnous</span>

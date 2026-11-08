@@ -3,7 +3,8 @@ import { Navigate, Route, Routes, useLocation, useParams } from "react-router-do
 
 import AuthCallback from "./pages/AuthCallback";
 import DiagramsList from "./pages/DiagramsList";
-import Landing from "./pages/Landing";
+// the clean, image-led landing page; the old one is ./pages/Landing (switch back by importing that)
+import Landing from "./pages/landing/CleanLanding";
 import Login from "./pages/Login";
 import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";

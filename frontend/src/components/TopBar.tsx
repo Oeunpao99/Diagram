@@ -6,6 +6,7 @@ import { useAuth } from "../store/useAuth";
 import { useDiagram } from "../store/useDiagram";
 import { ExportMenu } from "./ExportMenu";
 import { ImportMenu } from "./ImportMenu";
+import { ThemeIconButton } from "./ThemeToggle";
 import {
   ChevronDown,
   Grid,
@@ -363,6 +364,7 @@ export function TopBar() {
           Kumnous AI
         </button>
 
+        <ThemeIconButton />
         <AccountMenu />
       </div>
     </header>

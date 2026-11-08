@@ -1,3 +1,5 @@
+import hashlib
+import json
 import secrets
 import uuid
 
@@ -7,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import current_user, diagram_access
 from app.db.session import get_db
+from app.layout.engine import apply_layout
 from app.models import Diagram, DiagramMessage, DiagramVersion, Project, Template, User
 from app.schemas.diagram import (
+    DiagramDoc,
     DiagramCreate,
     DiagramListItem,
     DiagramMessageCreate,
@@ -21,6 +25,7 @@ from app.schemas.diagram import (
     TemplateOut,
     VersionOut,
 )
+from app.services.ai import _algorithm_for
 
 router = APIRouter(tags=["diagrams"])
 
@@ -389,9 +394,39 @@ async def clear_messages(
 # --------------------------------------------------------------------------
 
 
+# Laid-out template docs, keyed by slug and a hash of the stored data, so a
+# re-seeded template is laid out again but an unchanged one never is twice.
+_LAID_OUT: dict[tuple[str, str], dict] = {}
+
+
+def _laid_out(template: Template) -> dict:
+    """The template's doc with positions from the real layout engine — what
+    the editor would show after "Use template" — for previews that can't
+    call the (signed-in) layout endpoint, like the public landing page."""
+    raw = json.dumps(template.data, sort_keys=True, default=str)
+    key = (template.slug, hashlib.sha1(raw.encode()).hexdigest())
+    cached = _LAID_OUT.get(key)
+    if cached is None:
+        doc = DiagramDoc.model_validate(template.data)
+        apply_layout(doc, doc.direction, _algorithm_for(doc))
+        cached = _LAID_OUT[key] = doc.model_dump(mode="json")
+    return cached
+
+
 @router.get("/templates", response_model=list[TemplateOut])
-async def list_templates(category: str | None = None, db: AsyncSession = Depends(get_db)):
+async def list_templates(
+    category: str | None = None,
+    layout: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public, like the template library itself. `layout=true` returns each
+    template already laid out by the layout engine."""
     stmt = select(Template).order_by(Template.category, Template.name)
     if category:
         stmt = stmt.where(Template.category == category)
-    return (await db.execute(stmt)).scalars().all()
+    templates = (await db.execute(stmt)).scalars().all()
+    if not layout:
+        return templates
+    return [
+        TemplateOut.model_validate(t).model_copy(update={"data": _laid_out(t)}) for t in templates
+    ]

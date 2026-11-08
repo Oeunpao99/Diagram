@@ -41,38 +41,38 @@ export const TYPE_LABEL: Record<DiagramType, string> = {
   radial: "Circle diagram",
 };
 
-/** Tint (bg, border, ink) per diagram type, matching the old rail thumb hues. */
+/** Hue per diagram type. Used at full strength: a coloured element is the
+ *  solid colour itself with white on it, never a pale wash of it. */
 const TYPE_HUE: Record<DiagramType, string> = {
-  process_flow: "violet",
-  swimlane: "blue",
-  architecture: "navy",
-  network: "teal",
-  sequence: "amber",
-  er: "pink",
-  data_flow: "green",
-  org_chart: "orange",
-  mind_map: "red",
-  tree: "emerald",
-  radial: "gold",
+  process_flow: "#6d4fe0",
+  swimlane: "#2f6fe0",
+  architecture: "#3d5a80",
+  network: "#0f97a6",
+  sequence: "#d4890f",
+  er: "#d63f86",
+  data_flow: "#0d9f6e",
+  org_chart: "#ea6f1c",
+  mind_map: "#e0383a",
+  tree: "#10a46e",
+  radial: "#c99a06",
 };
 
-const TINT: Record<string, [string, string, string]> = {
-  violet: ["#f1eefc", "#e2dcf8", "#6a5bd5"],
-  blue: ["#ebf0fc", "#dae4f7", "#4a76cf"],
-  navy: ["#eaf0f6", "#d6e0ea", "#48617e"],
-  teal: ["#e4f4f5", "#cfe8ea", "#2b8a94"],
-  amber: ["#f8f0de", "#efdfbc", "#b57a22"],
-  pink: ["#fae9f1", "#f2d4e2", "#b84b78"],
-  green: ["#e2f4ec", "#c9e9d9", "#1d9a6c"],
-  orange: ["#faece3", "#f2d7c7", "#c1763a"],
-  red: ["#fae8e6", "#f2d2cf", "#c6574f"],
-  emerald: ["#e5f3ec", "#cfe8db", "#1f9d6e"],
-  gold: ["#fdf3d9", "#f6e3ac", "#a67c1b"],
-};
+function darken(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (shift: number) => Math.round(((n >> shift) & 255) * (1 - amount));
+  return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
+}
 
-export function tintFor(type: DiagramType) {
-  const hue = TYPE_HUE[type];
-  return TINT[hue] ?? ["#eaf0f6", "#d6e0ea", "#48617e"];
+/** The type's solid colour, for strokes and fills drawn in it. */
+export function hueFor(type: DiagramType): string {
+  return TYPE_HUE[type] ?? "#3d5a80";
+}
+
+/** [fill, border, foreground] for a coloured element of this type: the solid
+ *  hue, a darker edge of it, and white on top. */
+export function tintFor(type: DiagramType): [string, string, string] {
+  const hue = hueFor(type);
+  return [hue, darken(hue, 0.25), "#ffffff"];
 }
 
 /** Backend categories are lowercase slugs; present them product-first. */

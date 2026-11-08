@@ -45,14 +45,19 @@ function cornerCommand(
   const straight =
     (px === x && x === nx) || (py === y && y === ny) || r === 0;
   if (straight) return `L ${x} ${y}`;
+  // Stop `r` short of the corner on the side the line arrives from, then
+  // curve to `r` past it on the side it leaves toward. Deciding the stopping
+  // side from the *next* point instead (as this once did) put the stop past
+  // the corner whenever the turn was a right angle, so the line overshot
+  // and hooked back: a visible notch at every bend.
   if (py === y) {
-    const qx = px < nx ? x + r : x - r;
-    const qy = py < ny ? y + r : y - r;
-    return `L ${qx} ${y} Q ${x} ${y} ${x} ${qy}`;
+    const inX = px < x ? x - r : x + r;
+    const outY = ny > y ? y + r : y - r;
+    return `L ${inX} ${y} Q ${x} ${y} ${x} ${outY}`;
   }
-  const qy = py < ny ? y + r : y - r;
-  const qx = px < nx ? x + r : x - r;
-  return `L ${x} ${qy} Q ${x} ${y} ${qx} ${y}`;
+  const inY = py < y ? y - r : y + r;
+  const outX = nx > x ? x + r : x - r;
+  return `L ${x} ${inY} Q ${x} ${y} ${outX} ${y}`;
 }
 
 function segmentsClear(
@@ -255,15 +260,29 @@ const runX = runCandidates(
  *  `points[len / 2]`) put the label on the target end of a straight edge and
  *  on a bend next to the target otherwise, where the node covered it. */
 function labelAnchor(points: readonly (readonly [number, number])[]): [number, number] {
+  // A label is horizontal text, so it reads best sitting on a horizontal run
+  // with room either side; centred on a short vertical run it got squeezed
+  // into the bend. Take the longest horizontal run that fits a short label,
+  // and only fall back to the longest run of any direction when none does.
+  const ROOM = 46;
   let best = 0;
   let bestLen = -1;
+  let flat = -1;
+  let flatLen = -1;
   for (let i = 0; i < points.length - 1; i++) {
-    const len = Math.hypot(points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]);
+    const dx = points[i + 1][0] - points[i][0];
+    const dy = points[i + 1][1] - points[i][1];
+    const len = Math.hypot(dx, dy);
     if (len > bestLen) {
       bestLen = len;
       best = i;
     }
+    if (dy === 0 && len >= ROOM && len > flatLen) {
+      flatLen = len;
+      flat = i;
+    }
   }
+  if (flat >= 0) best = flat;
   const [ax, ay] = points[best];
   const [bx, by] = points[best + 1] ?? points[best];
   return [(ax + bx) / 2, (ay + by) / 2];

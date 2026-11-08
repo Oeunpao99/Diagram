@@ -319,6 +319,9 @@ export const api = {
   explain: (doc: DiagramDoc) => post<{ text: string }>("/ai/explain", doc),
 
   templates: () => get<Template[]>("/templates"),
+  /** Same list, each already laid out by the layout engine (public; used by
+   *  the landing page, which can't call the signed-in layout endpoint). */
+  templatesLaidOut: () => get<Template[]>("/templates?layout=true"),
 
   // `keepVersion` is off for autosaves — every node drag shouldn't mint a
   // DiagramVersion snapshot. Doing so just overwrites data in place.

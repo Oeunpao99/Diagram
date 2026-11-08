@@ -32,9 +32,9 @@ const FILL_MS = 380;
  *  says". The sketch still needs *some* concrete colour to animate a fill
  *  with, so this is that stylesheet's colour, restated as a value. */
 const KIND_FILL: Partial<Record<NodeKind, string>> = {
-  decision: "var(--amber)",
-  database: "#3f7a63",
-  data: "#3f7a63",
+  decision: "#a8670a",
+  database: "#0d9f6e",
+  data: "#0d9f6e",
   service: "#3d6c8c",
   system: "#3d6c8c",
 };
