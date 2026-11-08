@@ -55,6 +55,10 @@ services:
   frontend:
     build:
       context: ./frontend
+      # Public client IDs only — the matching secrets go in backend/.env.
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
+        VITE_GITHUB_CLIENT_ID: ${VITE_GITHUB_CLIENT_ID:-}
     container_name: diagram-frontend
     depends_on:
       backend:
