@@ -1,16 +1,19 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../store/useAuth";
+import { useBilling } from "../store/useBilling";
 import { useSettings, type SettingsSection } from "../store/useSettings";
 import { ACCENTS, THEMES } from "../theme";
 import {
   Check,
+  Lock,
   Monitor,
   Moon,
   Palette,
   Puzzle,
   Settings,
+  Sparkles,
   Sun,
   UserIcon,
   X,
@@ -18,6 +21,7 @@ import {
 
 const NAV: { id: SettingsSection; label: string; icon: () => ReactNode }[] = [
   { id: "profile", label: "Profile", icon: UserIcon },
+  { id: "password", label: "Password", icon: Lock },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "customization", label: "Customization", icon: Settings },
   { id: "extensions", label: "Extensions", icon: Puzzle },
@@ -78,6 +82,8 @@ function ProfilePane() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const updateName = useAuth((s) => s.updateName);
+  const closeSettings = useSettings((s) => s.closeSettings);
+  const openBilling = useBilling((s) => s.openBilling);
   const navigate = useNavigate();
   const [name, setName] = useState(user?.name ?? "");
   const [saved, setSaved] = useState(false);
@@ -104,9 +110,25 @@ function ProfilePane() {
           <strong className="text-sm font-[650] text-ink">{user.name}</strong>
           <span className="text-xs text-slate">{user.email}</span>
         </span>
-        <span className="rounded-full border border-green-line bg-green-soft px-2 py-0.5 text-[10.5px] font-[650] text-green-strong">
-          Pro plan
+      </div>
+
+      <div className="flex items-center gap-3 rounded-xl border border-line p-3">
+        <span className="grid size-[34px] shrink-0 place-items-center rounded-lg bg-green text-on-accent [&_svg]:size-4">
+          <Sparkles />
         </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <strong className="text-sm font-[650] text-ink">{user.credits} credits</strong>
+          <span className="text-xs text-slate">Used by AI actions. Credits never expire.</span>
+        </span>
+        <button
+          className="inline-flex shrink-0 cursor-pointer items-center rounded-md border border-green bg-green px-3 py-1.5 text-[12.5px] font-[550] text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong"
+          onClick={() => {
+            closeSettings();
+            openBilling("topup");
+          }}
+        >
+          Buy credits
+        </button>
       </div>
 
       <label className="flex flex-col gap-1.5">
@@ -146,6 +168,78 @@ function ProfilePane() {
         </button>
       </div>
     </div>
+  );
+}
+
+function PasswordPane() {
+  const busy = useAuth((s) => s.busy);
+  const changePassword = useAuth((s) => s.changePassword);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setNote(null);
+    try {
+      await changePassword(current, next);
+      setCurrent("");
+      setNext("");
+      setNote({ ok: true, text: "Password updated." });
+    } catch (err) {
+      setNote({ ok: false, text: (err as Error).message });
+    }
+  }
+
+  const input =
+    "rounded-[9px] border border-line bg-surface px-2.5 py-2 text-[13px] text-ink outline-none transition-[border-color,box-shadow] focus:border-green focus:shadow-[0_0_0_3px_var(--green-ring)]";
+
+  return (
+    <form className="flex flex-col gap-4" onSubmit={save}>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs font-[550] text-ink">Current password</span>
+        <input
+          className={input}
+          type="password"
+          autoComplete="current-password"
+          required
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+        />
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-xs font-[550] text-ink">New password</span>
+        <input
+          className={input}
+          type="password"
+          autoComplete="new-password"
+          required
+          minLength={8}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+        />
+        <span className="text-[11px] text-slate-soft">At least 8 characters.</span>
+      </label>
+
+      {note && (
+        <p
+          className={`m-0 rounded-md border px-3 py-2 text-[12.5px] ${note.ok ? "border-green text-green-strong" : "border-red text-red"}`}
+          role="alert"
+        >
+          {note.text}
+        </p>
+      )}
+
+      <div>
+        <button
+          className="inline-flex items-center justify-center rounded-md border border-green bg-green px-3 py-1.5 text-[12.5px] font-[550] text-on-accent transition-colors hover:border-green-strong hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45"
+          type="submit"
+          disabled={busy || !current || next.length < 8}
+        >
+          Change password
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -315,7 +409,7 @@ export function SettingsModal() {
           {NAV.map((item) => (
             <button
               key={item.id}
-              className={`flex cursor-pointer items-center gap-[9px] rounded-lg border-0 bg-transparent py-2 pl-2 pr-2.5 text-left text-[12.5px] font-medium text-slate transition-[background,color] hover:bg-surface hover:text-ink [&>svg]:size-[15px] ${section === item.id ? "bg-green-soft font-semibold text-green-strong" : ""}`}
+              className={`flex cursor-pointer items-center gap-[9px] rounded-lg border-0 bg-transparent py-2 pl-2 pr-2.5 text-left text-[12.5px] font-medium text-slate transition-[background,color] hover:bg-surface hover:text-ink [&>svg]:size-[15px] ${section === item.id ? "bg-green font-semibold text-on-accent hover:bg-green hover:text-on-accent" : ""}`}
               onClick={() => setSection(item.id)}
             >
               <item.icon />
@@ -343,6 +437,7 @@ export function SettingsModal() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-[18px] no-scrollbar">
             {section === "profile" && <ProfilePane />}
+            {section === "password" && <PasswordPane />}
             {section === "appearance" && <AppearancePane />}
             {section === "customization" && <CustomizationPane />}
             {section === "extensions" && <ExtensionsPane />}

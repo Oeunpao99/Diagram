@@ -9,12 +9,13 @@ import Login from "./pages/Login";
 import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";
 import Register from "./pages/Register";
-import Settings from "./pages/Settings";
 import Studio from "./pages/Studio";
 import TemplateLibrary from "./pages/TemplateLibrary";
 import { BuyCreditsModal } from "./components/BuyCreditsModal";
+import { SettingsModal } from "./components/SettingsModal";
 import { restorePanelWidth } from "./hooks/usePanelResize";
 import { useAuth } from "./store/useAuth";
+import { useSettings } from "./store/useSettings";
 import { applyTheme, watchSystemTheme } from "./theme";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -27,6 +28,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (booting) return <div className="min-h-screen bg-paper" role="status" aria-label="Loading" />;
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
+}
+
+/** `/settings` (old links, bookmarks): settings are a dialog now, so open
+ *  it over the studio instead of showing a separate page. */
+function SettingsRoute() {
+  useEffect(() => {
+    useSettings.getState().openSettings("profile");
+  }, []);
+  return <Navigate to="/" replace />;
 }
 
 /** `/` — the studio for signed-in users, the landing page for everyone else. */
@@ -70,7 +80,7 @@ export default function App() {
         path="/settings"
         element={
           <RequireAuth>
-            <Settings />
+            <SettingsRoute />
           </RequireAuth>
         }
       />
@@ -135,6 +145,7 @@ export default function App() {
     </Routes>
     {/* App-wide: opened from the credit badge, or by any AI call that comes
         back 402 (out of credits). */}
+    <SettingsModal />
     <BuyCreditsModal />
     </>
   );

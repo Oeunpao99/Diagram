@@ -1,6 +1,11 @@
 import { create } from "zustand";
 
-export type SettingsSection = "profile" | "appearance" | "customization" | "extensions";
+export type SettingsSection =
+  | "profile"
+  | "password"
+  | "appearance"
+  | "customization"
+  | "extensions";
 
 export interface CanvasPrefs {
   minimap: boolean;

@@ -3,7 +3,6 @@ import { useEffect } from "react";
 
 import { Canvas } from "../components/Canvas";
 import { Copilot } from "../components/Copilot";
-import { SettingsModal } from "../components/SettingsModal";
 import { StatusBar } from "../components/StatusBar";
 import { TemplateRail } from "../components/TemplateRail";
 import { TopBar } from "../components/TopBar";
@@ -43,7 +42,6 @@ export default function Studio({ sharedToken }: { sharedToken?: string }) {
             <button onClick={clearError}>Dismiss</button>
           </div>
         )}
-        <SettingsModal />
       </div>
     </ReactFlowProvider>
   );

@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import { emptyDoc } from "../api/types";
 import { useAuth } from "../store/useAuth";
+import { useSettings } from "../store/useSettings";
 import { useDiagram } from "../store/useDiagram";
 import { CreditBadge } from "./CreditBadge";
 import { ThemeIconButton } from "./ThemeToggle";
@@ -143,7 +144,7 @@ function WorkspaceSwitcher() {
           <MenuItem
             onClick={() => {
               setOpen(false);
-              navigate("/settings");
+              useSettings.getState().openSettings("profile");
             }}
           >
             <Settings />
@@ -321,7 +322,7 @@ function SidebarProfile() {
           <MenuItem
             onClick={() => {
               setOpen(false);
-              navigate("/settings");
+              useSettings.getState().openSettings("profile");
             }}
           >
             <Settings />

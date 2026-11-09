@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "../api/client";
 import { useAuth } from "../store/useAuth";
+import { useSettings } from "../store/useSettings";
 import { useDiagram } from "../store/useDiagram";
 import { CreditBadge } from "./CreditBadge";
 import { ExportMenu } from "./ExportMenu";
@@ -46,7 +47,7 @@ export function AccountMenu() {
       </div>
       <button
         className="flex w-full items-center gap-[9px] rounded-[7px] px-[9px] py-[7px] text-left text-[12.5px] text-ink hover:bg-surface-2 [&_svg]:size-[15px] [&_svg]:text-slate"
-        onClick={() => navigate("/settings")}
+        onClick={() => useSettings.getState().openSettings("profile")}
       >
         Settings
       </button>

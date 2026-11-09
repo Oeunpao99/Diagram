@@ -577,6 +577,13 @@ export const EyeOff = () => (
   </S>
 );
 
+export const Lock = () => (
+  <S>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </S>
+);
+
 export const Grid = () => (
   <S>
     <rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.4" />
