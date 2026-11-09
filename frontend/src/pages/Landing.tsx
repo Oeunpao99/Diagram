@@ -45,12 +45,11 @@ const TYPES = Object.keys(TYPE_LABEL) as DiagramType[];
  *  sign-up instead, so the button never points at a made-up address. */
 const SALES_EMAIL = "";
 
-/** Yearly billing takes this much off the monthly price. */
-const YEARLY_DISCOUNT = 0.2;
-
-/** Prices per plan, in the same order as the copy's plans; Pro is index 1. */
-const PLAN_PRICES = [0, 6, 10];
-const RECOMMENDED_PLAN = 1;
+/** One-time KHQR pack prices in USD, in the same order as the copy's plans
+ *  (Dot free / Line / Shape). Keep in step with PACKS in
+ *  backend/app/services/credits.py. */
+const PLAN_PRICES = [0, 3, 9];
+const RECOMMENDED_PLAN = 2;
 
 /** Rises its contents in the first time they scroll into view; `delay`
  *  staggers siblings. Reduced motion shows them straight away (see
@@ -267,37 +266,14 @@ function FeatureRow({ title, body, children }: { title: string; body: string; ch
 }
 
 export function Pricing({ copy, signUp }: { copy: LandingCopy["pricing"]; signUp: string }) {
-  const [yearly, setYearly] = useState(true);
-  const price = (monthly: number) => {
-    const value = yearly ? monthly * (1 - YEARLY_DISCOUNT) : monthly;
-    return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
-  };
+  const price = (amount: number) => `$${amount}`;
 
   return (
     <div>
-      <div className="inline-flex rounded-lg border border-line bg-surface p-1" role="group" aria-label={copy.title}>
-        {[
-          { value: false, label: copy.monthly },
-          { value: true, label: copy.yearly(YEARLY_DISCOUNT * 100) },
-        ].map((option) => (
-          <button
-            key={option.label}
-            type="button"
-            aria-pressed={yearly === option.value}
-            onClick={() => setYearly(option.value)}
-            className={`cursor-pointer rounded-md border-0 px-4 py-1.5 text-[14px] font-medium transition-colors ${FOCUS} ${
-              yearly === option.value ? "bg-green text-on-accent" : "bg-transparent text-slate hover:text-ink-strong"
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-6 grid grid-cols-3 items-start gap-4 max-[860px]:grid-cols-1">
+      <div className="grid grid-cols-3 items-start gap-4 max-[860px]:grid-cols-1">
         {copy.plans.map((plan, i) => {
           const highlight = i === RECOMMENDED_PLAN;
-          const monthly = PLAN_PRICES[i];
+          const amount = PLAN_PRICES[i];
           return (
             <Reveal key={plan.name} delay={i * 0.1}>
             <div
@@ -310,12 +286,9 @@ export function Pricing({ copy, signUp }: { copy: LandingCopy["pricing"]; signUp
               <p className="mb-0 mt-1 min-h-[72px] text-[14px] leading-[1.6] text-slate">{plan.blurb}</p>
               <p className="mb-0 mt-5 flex flex-wrap items-baseline gap-2">
                 <span className={`${DISPLAY} text-[40px] font-semibold leading-none tracking-[-0.02em] text-ink-strong`}>
-                  {price(monthly)}
+                  {price(amount)}
                 </span>
                 {plan.unit && <span className="text-[13.5px] text-slate">{plan.unit}</span>}
-              </p>
-              <p className="mb-0 mt-2 min-h-[20px] text-[12.5px] text-slate-soft">
-                {monthly > 0 && yearly ? copy.billedYearly(monthly) : ""}
               </p>
               <Link
                 to="/register"

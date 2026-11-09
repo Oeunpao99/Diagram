@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../store/useAuth";
 import { useDiagram } from "../store/useDiagram";
+import { CreditBadge } from "./CreditBadge";
 import { ExportMenu } from "./ExportMenu";
 import { ImportMenu } from "./ImportMenu";
 import { ThemeIconButton } from "./ThemeToggle";
@@ -364,6 +365,7 @@ export function TopBar() {
           Kumnous AI
         </button>
 
+        <CreditBadge />
         <ThemeIconButton />
         <AccountMenu />
       </div>

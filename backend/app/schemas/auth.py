@@ -46,6 +46,7 @@ class UserOut(BaseModel):
     name: str
     theme: Theme
     accent: Accent
+    credits: int
 
     model_config = {"from_attributes": True}
 

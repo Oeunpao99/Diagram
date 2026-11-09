@@ -316,6 +316,41 @@ export interface User {
   name: string;
   theme: Theme;
   accent: Accent;
+  /** AI credits left. Kept current from each AI response's X-Credits header. */
+  credits: number;
+}
+
+export interface CreditPack {
+  id: string;
+  name: string;
+  credits: number;
+  amount_cents: number;
+  currency: string;
+}
+
+export interface Billing {
+  credits: number;
+  payments_enabled: boolean;
+  packs: CreditPack[];
+  /** Credits each AI action costs, by action name. */
+  costs: Record<string, number>;
+}
+
+export type PaymentStatus = "pending" | "paid" | "expired";
+
+export interface Payment {
+  id: string;
+  pack: string;
+  credits: number;
+  amount_cents: number;
+  currency: string;
+  status: PaymentStatus;
+  /** The KHQR string to render as a QR code. */
+  qr: string;
+  merchant_name: string;
+  expires_at: string;
+  /** Account balance after this check. */
+  balance: number;
 }
 
 export interface TokenResponse {

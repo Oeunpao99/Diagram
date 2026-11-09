@@ -2,6 +2,7 @@ import type {
   Accent,
   AgentResult,
   AgentStreamEvent,
+  Billing,
   ChatMessage,
   ChatTurn,
   DiagramDoc,
@@ -12,6 +13,7 @@ import type {
   EditResult,
   GenerateResult,
   ImprovedPrompt,
+  Payment,
   Project,
   RouteResult,
   ShareRole,
@@ -64,6 +66,8 @@ function parseErrorDetail(text: string): string {
 
 let token: string | null = readStoredToken();
 let onUnauthorized: (() => void) | null = null;
+let onCredits: ((balance: number) => void) | null = null;
+let onOutOfCredits: (() => void) | null = null;
 
 function readStoredToken(): string | null {
   try {
@@ -99,11 +103,30 @@ function headers(json = true): Record<string, string> {
   return h;
 }
 
+/** Credits: every AI response (and a 402) carries the new balance in an
+ *  X-Credits header; the auth store listens so the badge stays current, and
+ *  the billing store opens the top-up dialog when a 402 says they're out. */
+export function setCreditHandlers(handlers: {
+  onCredits: ((balance: number) => void) | null;
+  onOutOfCredits: (() => void) | null;
+}) {
+  onCredits = handlers.onCredits;
+  onOutOfCredits = handlers.onOutOfCredits;
+}
+
+function noteCredits(response: Response) {
+  const header = response.headers.get("X-Credits");
+  if (header === null) return;
+  const balance = Number(header);
+  if (Number.isFinite(balance)) onCredits?.(balance);
+}
+
 async function guard(response: Response) {
   if (response.status === 401) {
     setToken(null);
     onUnauthorized?.();
   }
+  if (response.status === 402) onOutOfCredits?.();
 }
 
 /** Nothing on the wire guarantees a reply ever comes — a body the proxy
@@ -134,6 +157,7 @@ async function post<T>(path: string, body: unknown, method = "POST"): Promise<T>
       signal,
     }),
   );
+  noteCredits(response);
   if (!response.ok) {
     await guard(response);
     const detail = await response.text();
@@ -187,6 +211,7 @@ async function streamAgent(
       history,
     }),
   });
+  noteCredits(response);
   if (!response.ok) {
     await guard(response);
     const detail = await response.text();
@@ -413,6 +438,14 @@ export const api = {
 
   changePassword: (current_password: string, new_password: string) =>
     post<void>("/auth/me/password", { current_password, new_password }),
+
+  /* --- credits & KHQR top-ups --- */
+
+  billing: () => get<Billing>("/billing"),
+
+  checkout: (pack: string) => post<Payment>("/billing/checkout", { pack }),
+
+  payment: (id: string) => get<Payment>(`/billing/payments/${id}`),
 };
 
 export { ApiError };

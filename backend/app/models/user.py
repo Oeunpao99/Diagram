@@ -1,6 +1,7 @@
-from sqlalchemy import Boolean, Index, String
+from sqlalchemy import Boolean, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.config import settings
 from app.db.base import Base, TimestampMixin, UUIDMixin
 
 
@@ -32,6 +33,19 @@ class User(Base, UUIDMixin, TimestampMixin):
     # --- identity provider --------------------------------------------------
     oauth_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
     oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # --- credits ------------------------------------------------------------
+    # Spent by AI actions, topped up by KHQR payments. Only ever changed by a
+    # single conditional UPDATE in services/credits.py, never read-modify-write,
+    # so two requests at once can't both spend the last credit.
+    credits: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        # New sign-ups (password or Google/GitHub) get the configured amount;
+        # the server default only covers rows that existed before this column.
+        default=lambda: settings.signup_credits,
+        server_default=text("20"),
+    )
 
     # --- preferences ------------------------------------------------------
     # "system" follows the OS; the other two pin it.

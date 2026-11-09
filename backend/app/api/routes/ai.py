@@ -2,7 +2,7 @@ import asyncio
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +31,15 @@ from app.schemas.diagram import (
     RouteMessageResponse,
     ValidationReport,
 )
-from app.services import ai
+from app.services import ai, credits
 from app.services.validator import validate
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+# Every model-calling route below spends credits (see services/credits.COSTS):
+# charged after the request is validated, refunded if the model call fails,
+# and the new balance returned in an X-Credits header so the client's credit
+# badge stays current without polling.
 
 
 @router.post("/improve-prompt", response_model=ImprovePromptResponse)
@@ -61,7 +66,8 @@ _MAX_IMAGE_DATA_URL = 8_000_000
 @router.post("/analyze-image", response_model=ImprovePromptResponse)
 async def analyze_image(
     payload: AnalyzeImageRequest,
-    _user: User = Depends(current_user),
+    response: Response,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Step 1, alternate form: a sketch instead of a typed description."""
@@ -69,38 +75,48 @@ async def analyze_image(
         raise HTTPException(400, "That doesn't look like an image.")
     if len(payload.image_data_url) > _MAX_IMAGE_DATA_URL:
         raise HTTPException(400, "That image is too large — try a smaller one.")
+    charge = await credits.charge(db, user, "analyze_image")
     try:
-        return await ai.analyze_image(db, payload.image_data_url, payload.prompt)
+        result = await ai.analyze_image(db, payload.image_data_url, payload.prompt)
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Image analysis failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/generate-icon", response_model=GenerateIconResponse)
 async def generate_icon(
     payload: GenerateIconRequest,
-    _user: User = Depends(current_user),
+    response: Response,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """A small SVG icon for the asset library, drawn from a description."""
     if not payload.prompt.strip():
         raise HTTPException(400, "Describe the icon you want.")
+    charge = await credits.charge(db, user, "icon")
     try:
-        return GenerateIconResponse(svg=await ai.generate_icon(db, payload.prompt))
-    except ValueError as exc:
-        # The model's own output failed the safety/shape check — a 502 (the
-        # model, not the caller, did something wrong) with the specific reason.
-        raise HTTPException(502, f"Icon generation failed: {exc}") from exc
+        result = GenerateIconResponse(svg=await ai.generate_icon(db, payload.prompt))
     except Exception as exc:
+        # Includes ValueError: the model's own output failed the safety/shape
+        # check — a 502 (the model, not the caller, did something wrong).
+        await charge.refund(db)
         raise HTTPException(502, f"Icon generation failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/generate", response_model=GenerateResponse)
 async def generate(
     payload: GenerateRequest,
+    response: Response,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Steps 2-7: pick a template, generate, repair, lay out, review."""
+    owner_id = user.id
+    charge = await credits.charge(db, user, "generate")
     try:
         doc, report, notes = await ai.generate_diagram(
             db,
@@ -110,12 +126,14 @@ async def generate(
             payload.direction,
         )
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Diagram agent failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
 
     diagram_id: uuid.UUID | None = None
     if payload.save:
         diagram = Diagram(
-            owner_id=user.id,
+            owner_id=owner_id,
             project_id=payload.project_id,
             title=doc.title,
             diagram_type=doc.diagram_type.value,
@@ -197,6 +215,7 @@ async def agent_stream(
     if not payload.message.strip():
         raise HTTPException(400, "Say what you'd like to know or change.")
     await _assert_owns(db, user, payload.diagram_id)
+    charge = await credits.charge(db, user, "agent")
 
     queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
 
@@ -214,6 +233,10 @@ async def agent_stream(
             )
             queue.put_nowait({"type": "result", "result": body.model_dump(mode="json")})
         except Exception as exc:
+            try:
+                await charge.refund(db)
+            except Exception:  # never let a failed refund hide the real error
+                pass
             queue.put_nowait({"type": "error", "message": f"Agent failed: {exc}"})
         finally:
             queue.put_nowait(None)
@@ -233,13 +256,18 @@ async def agent_stream(
     return StreamingResponse(
         stream(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Credits": str(charge.balance),
+        },
     )
 
 
 @router.post("/agent", response_model=AgentResponse)
 async def agent(
     payload: AgentRequest,
+    response: Response,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -253,8 +281,9 @@ async def agent(
     if not payload.message.strip():
         raise HTTPException(400, "Say what you'd like to know or change.")
     await _assert_owns(db, user, payload.diagram_id)
+    charge = await credits.charge(db, user, "agent")
     try:
-        return await ai.run_agent(
+        result = await ai.run_agent(
             db,
             payload.doc,
             payload.message,
@@ -264,12 +293,16 @@ async def agent(
             history=payload.history,
         )
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Agent failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/edit", response_model=EditResponse)
 async def edit(
     payload: EditRequest,
+    response: Response,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -280,9 +313,9 @@ async def edit(
     # Optional: when the client says which diagram this is, check the caller
     # owns it and stamp the AIRun row so per-diagram history actually works.
     await _assert_owns(db, user, payload.diagram_id)
-
+    charge = await credits.charge(db, user, "edit")
     try:
-        return await ai.edit_diagram(
+        result = await ai.edit_diagram(
             db,
             payload.doc,
             payload.instruction,
@@ -291,12 +324,16 @@ async def edit(
             diagram_id=payload.diagram_id,
         )
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Edit agent failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/restyle-template", response_model=EditResponse)
 async def restyle_template(
     payload: RestyleTemplateRequest,
+    response: Response,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -305,14 +342,19 @@ async def restyle_template(
     diagram already has content (as opposed to loading a template's static
     example onto a blank canvas, which is a plain client-side swap)."""
     await _assert_owns(db, user, payload.diagram_id)
+    charge = await credits.charge(db, user, "restyle")
     try:
-        return await ai.restyle_to_template(
+        result = await ai.restyle_to_template(
             db, payload.doc, payload.template_slug, diagram_id=payload.diagram_id
         )
     except ValueError as exc:
+        await charge.refund(db)
         raise HTTPException(404, str(exc)) from exc
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Restyle failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/validate", response_model=ValidationReport)
@@ -330,22 +372,34 @@ async def layout(payload: LayoutRequest, _user: User = Depends(current_user)):
 @router.post("/documentation", response_model=DocumentationResponse)
 async def documentation(
     payload: DocumentationRequest,
-    _user: User = Depends(current_user),
+    response: Response,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    charge = await credits.charge(db, user, "documentation")
     try:
-        return await ai.generate_documentation(db, payload.doc, payload.audience, payload.language)
+        result = await ai.generate_documentation(
+            db, payload.doc, payload.audience, payload.language
+        )
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Documentation failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return result
 
 
 @router.post("/explain")
 async def explain(
     doc: DiagramDoc,
-    _user: User = Depends(current_user),
+    response: Response,
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    charge = await credits.charge(db, user, "explain")
     try:
-        return {"text": await ai.explain_diagram(db, doc)}
+        text = await ai.explain_diagram(db, doc)
     except Exception as exc:
+        await charge.refund(db)
         raise HTTPException(502, f"Explain failed: {exc}") from exc
+    response.headers["X-Credits"] = str(charge.balance)
+    return {"text": text}

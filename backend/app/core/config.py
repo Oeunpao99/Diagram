@@ -39,6 +39,24 @@ class Settings(BaseSettings):
     github_client_id: str | None = None
     github_client_secret: str | None = None
 
+    # --- Credits & payment (Bakong KHQR) ------------------------------------
+    # Every new account starts with this many credits; see services/credits.py
+    # for what each AI action costs and what each pack sells.
+    signup_credits: int = 20
+    # All optional: with no account id / token, /billing/checkout answers 503
+    # ("payments aren't set up") and the rest of the app runs as normal.
+    bakong_account_id: str | None = None  # e.g. "name@aclb" — receives the money
+    bakong_account_info: str | None = None  # optional, e.g. the account number
+    bakong_acquiring_bank: str | None = None  # optional, e.g. "ACLEDA Bank"
+    bakong_merchant_name: str = "Kumnous"
+    bakong_merchant_city: str = "Phnom Penh"
+    bakong_api_token: str | None = None  # from api-bakong.nbc.gov.kh — renew yearly
+    bakong_api_url: str = "https://api-bakong.nbc.gov.kh/v1"
+
+    @property
+    def payments_enabled(self) -> bool:
+        return bool(self.bakong_account_id and self.bakong_api_token)
+
     @property
     def fast_deployment(self) -> str:
         return self.azure_openai_fast_deployment or self.azure_openai_deployment

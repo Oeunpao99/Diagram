@@ -1,8 +1,16 @@
 import { create } from "zustand";
 
-import { api, ApiError, getToken, setToken, setUnauthorizedHandler } from "../api/client";
+import {
+  api,
+  ApiError,
+  getToken,
+  setCreditHandlers,
+  setToken,
+  setUnauthorizedHandler,
+} from "../api/client";
 import type { Accent, Theme, TokenResponse, User } from "../api/types";
 import { applyTheme, storedAccent, storedTheme } from "../theme";
+import { useBilling } from "./useBilling";
 
 interface AuthState {
   user: User | null;
@@ -23,6 +31,8 @@ interface AuthState {
   setAppearance: (patch: { theme?: Theme; accent?: Accent }) => Promise<void>;
   updateName: (name: string) => Promise<void>;
   changePassword: (current: string, next: string) => Promise<void>;
+  /** Adopt a new credit balance (from an AI response or a settled payment). */
+  setCredits: (credits: number) => void;
   clearError: () => void;
 }
 
@@ -53,6 +63,10 @@ export const useAuth = create<AuthState>((set, get) => ({
   async boot() {
     // A 401 anywhere in the app drops us back to signed-out.
     setUnauthorizedHandler(() => set({ user: null }));
+    setCreditHandlers({
+      onCredits: (credits) => get().setCredits(credits),
+      onOutOfCredits: () => useBilling.getState().openBilling("out"),
+    });
 
     if (!getToken()) {
       set({ booting: false });
@@ -160,6 +174,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ busy: false });
       throw new Error(message(err, "Could not change your password."));
     }
+  },
+
+  setCredits(credits) {
+    const user = get().user;
+    if (user && user.credits !== credits) set({ user: { ...user, credits } });
   },
 
   clearError: () => set({ error: null }),

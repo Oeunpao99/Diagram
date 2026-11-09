@@ -4,6 +4,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { emptyDoc } from "../api/types";
 import { useAuth } from "../store/useAuth";
 import { useDiagram } from "../store/useDiagram";
+import { CreditBadge } from "./CreditBadge";
 import { ThemeIconButton } from "./ThemeToggle";
 import { initials } from "./TopBar";
 import {
@@ -275,6 +276,7 @@ function Sidebar({
 
       <div className="mt-auto flex flex-col gap-3">
         <CopilotPromo />
+        <CreditBadge size="md" />
         <SidebarProfile />
       </div>
     </nav>

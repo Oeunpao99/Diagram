@@ -12,6 +12,7 @@ import Register from "./pages/Register";
 import Settings from "./pages/Settings";
 import Studio from "./pages/Studio";
 import TemplateLibrary from "./pages/TemplateLibrary";
+import { BuyCreditsModal } from "./components/BuyCreditsModal";
 import { restorePanelWidth } from "./hooks/usePanelResize";
 import { useAuth } from "./store/useAuth";
 import { applyTheme, watchSystemTheme } from "./theme";
@@ -60,6 +61,7 @@ export default function App() {
   }, [boot]);
 
   return (
+    <>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
@@ -131,5 +133,9 @@ export default function App() {
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    {/* App-wide: opened from the credit badge, or by any AI call that comes
+        back 402 (out of credits). */}
+    <BuyCreditsModal />
+    </>
   );
 }

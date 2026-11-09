@@ -94,10 +94,7 @@ export interface LandingCopy {
   pricing: {
     title: string;
     intro: string;
-    monthly: string;
-    yearly: (pct: number) => string;
     recommended: string;
-    billedYearly: (monthly: number) => string;
     plans: { name: string; unit: string; blurb: string; cta: string; features: string[] }[];
     enterprise: Point & { contact: string };
   };
@@ -206,10 +203,10 @@ const en: LandingCopy = {
     ],
     pricing: [
       {
-        title: "Predictable cost",
-        body: "A fixed monthly price per person, with AI use included up to the plan's limit.",
+        title: "Pay as you go",
+        body: "Buy credits once and use them whenever you need. No subscription to cancel.",
       },
-      { title: "Start small", body: "Try it free with real work, then upgrade the people who use it most." },
+      { title: "Start small", body: "Try it free with real work, then top up only when you need more." },
       {
         title: "Your data stays yours",
         body: "On-premise keeps sensitive process and system information inside your own network.",
@@ -293,48 +290,48 @@ const en: LandingCopy = {
   },
   pricing: {
     title: "Pricing",
-    intro: "Every plan includes the full editor. Plans differ in how many AI actions you get each month.",
-    monthly: "Monthly",
-    yearly: (pct) => `Yearly (save ${pct}%)`,
-    recommended: "Recommended",
-    billedYearly: (m) => `Billed yearly, or $${m} month to month`,
+    intro: "Every account gets the full editor. You only pay for AI: buy credits once with KHQR, and use them whenever you like. No subscription.",
+    recommended: "Best value",
     plans: [
       {
-        name: "Free",
+        name: "Dot",
         unit: "",
-        blurb: "For trying it out and the occasional diagram.",
+        blurb: "Try it with real work. No card needed.",
         cta: "Create a free account",
-        features: ["15 AI actions a month", "Full editor and all 11 diagram types", "Up to 3 projects", "PNG export"],
-      },
-      {
-        name: "Pro",
-        unit: "per month",
-        blurb: "For people who diagram every week.",
-        cta: "Choose Pro",
         features: [
-          "150 AI actions a month",
-          "Everything in Free",
-          "Unlimited projects",
+          "20 free credits when you sign up",
+          "Full editor and all 11 diagram types",
           "PNG, SVG and PDF export",
           "Share links",
-          "All templates",
         ],
       },
       {
-        name: "Team",
-        unit: "per user, per month",
-        blurb: "For teams documenting processes together. Minimum 3 users.",
-        cta: "Choose Team",
+        name: "Line",
+        unit: "one-time",
+        blurb: "For the occasional diagram and quick revisions.",
+        cta: "Get Line",
         features: [
-          "300 AI actions per user, shared by the team",
-          "Everything in Pro",
-          "Shared projects",
-          "Team management",
+          "100 credits",
+          "3¢ per credit",
+          "Credits never expire",
+          "Pay by KHQR: ABA, ACLEDA, Wing and more",
+        ],
+      },
+      {
+        name: "Shape",
+        unit: "one-time",
+        blurb: "For people who diagram every week.",
+        cta: "Get Shape",
+        features: [
+          "400 credits",
+          "2.25¢ per credit, the best rate",
+          "Credits never expire",
+          "Pay by KHQR: ABA, ACLEDA, Wing and more",
         ],
       },
     ],
     enterprise: {
-      title: "Enterprise and on-premise",
+      title: "Masterpiece: larger needs and on-premise",
       body: "Run Kumnous on your own server with your own AI key, so process data never leaves your network. Includes custom templates, setup, training and support.",
       contact: "Contact us",
     },
@@ -359,18 +356,18 @@ const en: LandingCopy = {
         a: "Export it as PNG, SVG or PDF, or send a share link so someone else can open it.",
       },
       {
-        q: "What counts as an AI action?",
-        a: "Generating a diagram, or asking the copilot to change one, is one action. Moving shapes, restyling, exporting, and the automatic layout and checks never use any.",
+        q: "What does a credit buy?",
+        a: "Generating a diagram, or one change from the copilot, costs 1 credit. Reading a sketch or photo, or writing documentation, costs 2. Moving shapes, restyling, exporting, and the automatic layout and checks are free.",
       },
       {
-        q: "What happens if I run out of AI actions?",
-        a: "Nothing is locked. You can keep editing and exporting by hand, and your AI actions refill at the start of the next month. You can also upgrade at any time.",
+        q: "What happens if I run out of credits?",
+        a: "Nothing is locked. You can keep editing and exporting by hand, and top up any time by scanning a KHQR code with ABA, ACLEDA, Wing or any Bakong app. Credits never expire.",
       },
     ],
   },
   closing: {
     title: "Describe the process you're working on now.",
-    body: "The free plan includes 15 AI actions a month and the full editor.",
+    body: "Every new account gets 20 free credits and the full editor.",
   },
 };
 
@@ -475,12 +472,12 @@ const km: LandingCopy = {
     ],
     pricing: [
       {
-        title: "ចំណាយដែលអាចព្យាករបាន",
-        body: "តម្លៃប្រចាំខែថេរក្នុងម្នាក់ រួមទាំងការប្រើ AI រហូតដល់ដែនកំណត់នៃគម្រោង។",
+        title: "បង់តាមការប្រើប្រាស់",
+        body: "ទិញក្រេឌីតម្តង ហើយប្រើនៅពេលអ្នកត្រូវការ។ គ្មានការជាវប្រចាំខែដែលត្រូវលុបចោលទេ។",
       },
       {
         title: "ចាប់ផ្តើមពីតូច",
-        body: "សាកល្បងដោយឥតគិតថ្លៃជាមួយការងារពិត បន្ទាប់មកដំឡើងគម្រោងឱ្យអ្នកដែលប្រើច្រើនជាងគេ។",
+        body: "សាកល្បងដោយឥតគិតថ្លៃជាមួយការងារពិត បន្ទាប់មកបញ្ចូលក្រេឌីតតែនៅពេលអ្នកត្រូវការបន្ថែម។",
       },
       {
         title: "ទិន្នន័យរបស់អ្នកនៅជារបស់អ្នក",
@@ -565,53 +562,48 @@ const km: LandingCopy = {
   },
   pricing: {
     title: "តម្លៃ",
-    intro: "គ្រប់គម្រោងរួមបញ្ចូលកម្មវិធីកែសម្រួលពេញលេញ។ គម្រោងខុសគ្នាត្រង់ចំនួនសកម្មភាព AI ដែលអ្នកទទួលបានរៀងរាល់ខែ។",
-    monthly: "ប្រចាំខែ",
-    yearly: (pct) => `ប្រចាំឆ្នាំ (សន្សំ ${pct}%)`,
-    recommended: "ណែនាំ",
-    billedYearly: (m) => `គិតប្រាក់ប្រចាំឆ្នាំ ឬ $${m} ប្រចាំខែ`,
+    intro: "គណនីនីមួយៗទទួលបានកម្មវិធីកែសម្រួលពេញលេញ។ អ្នកបង់ប្រាក់សម្រាប់តែ AI ប៉ុណ្ណោះ៖ ទិញក្រេឌីតម្តងតាម KHQR ហើយប្រើវានៅពេលណាក៏បាន។ គ្មានការជាវប្រចាំខែទេ។",
+    recommended: "តម្លៃល្អបំផុត",
     plans: [
       {
-        name: "ឥតគិតថ្លៃ",
+        name: "Dot",
         unit: "",
-        blurb: "សម្រាប់សាកល្បង និងដ្យាក្រាមម្តងម្កាល។",
+        blurb: "សាកល្បងជាមួយការងារពិត។ មិនត្រូវការកាតទេ។",
         cta: "បង្កើតគណនីឥតគិតថ្លៃ",
         features: [
-          "សកម្មភាព AI 15 ក្នុងមួយខែ",
+          "ក្រេឌីតឥតគិតថ្លៃ 20 នៅពេលចុះឈ្មោះ",
           "កម្មវិធីកែសម្រួលពេញលេញ និងដ្យាក្រាមទាំង 11 ប្រភេទ",
-          "រហូតដល់ 3 គម្រោង",
-          "នាំចេញ PNG",
-        ],
-      },
-      {
-        name: "Pro",
-        unit: "ក្នុងមួយខែ",
-        blurb: "សម្រាប់អ្នកដែលគូរដ្យាក្រាមរៀងរាល់សប្តាហ៍។",
-        cta: "ជ្រើសរើស Pro",
-        features: [
-          "សកម្មភាព AI 150 ក្នុងមួយខែ",
-          "អ្វីៗទាំងអស់ក្នុងគម្រោងឥតគិតថ្លៃ",
-          "គម្រោងមិនកំណត់",
           "នាំចេញ PNG, SVG និង PDF",
           "តំណចែករំលែក",
-          "គំរូទាំងអស់",
         ],
       },
       {
-        name: "ក្រុម",
-        unit: "ក្នុងម្នាក់ ក្នុងមួយខែ",
-        blurb: "សម្រាប់ក្រុមដែលចងក្រងដំណើរការជាមួយគ្នា។ យ៉ាងតិច 3 នាក់។",
-        cta: "ជ្រើសរើសគម្រោងក្រុម",
+        name: "Line",
+        unit: "បង់ម្តង",
+        blurb: "សម្រាប់ដ្យាក្រាមម្តងម្កាល និងការកែសម្រួលរហ័ស។",
+        cta: "ទិញ Line",
         features: [
-          "សកម្មភាព AI 300 ក្នុងម្នាក់ ប្រើរួមគ្នាក្នុងក្រុម",
-          "អ្វីៗទាំងអស់ក្នុង Pro",
-          "គម្រោងរួម",
-          "ការគ្រប់គ្រងក្រុម",
+          "ក្រេឌីត 100",
+          "3¢ ក្នុងមួយក្រេឌីត",
+          "ក្រេឌីតមិនផុតកំណត់",
+          "បង់តាម KHQR៖ ABA, ACLEDA, Wing និងច្រើនទៀត",
+        ],
+      },
+      {
+        name: "Shape",
+        unit: "បង់ម្តង",
+        blurb: "សម្រាប់អ្នកដែលគូរដ្យាក្រាមរៀងរាល់សប្តាហ៍។",
+        cta: "ទិញ Shape",
+        features: [
+          "ក្រេឌីត 400",
+          "2.25¢ ក្នុងមួយក្រេឌីត ជាតម្លៃល្អបំផុត",
+          "ក្រេឌីតមិនផុតកំណត់",
+          "បង់តាម KHQR៖ ABA, ACLEDA, Wing និងច្រើនទៀត",
         ],
       },
     ],
     enterprise: {
-      title: "សហគ្រាស និងការដំឡើងផ្ទាល់",
+      title: "Masterpiece៖ តម្រូវការធំ និងការដំឡើងផ្ទាល់",
       body: "ដំណើរការ Kumnous លើម៉ាស៊ីនមេរបស់អ្នកផ្ទាល់ ជាមួយកូនសោ AI ផ្ទាល់ខ្លួន ដូច្នេះទិន្នន័យដំណើរការមិនចាកចេញពីបណ្តាញរបស់អ្នកឡើយ។ រួមមានគំរូតាមតម្រូវការ ការដំឡើង ការបណ្តុះបណ្តាល និងការគាំទ្រ។",
       contact: "ទាក់ទងមកយើង",
     },
@@ -636,18 +628,18 @@ const km: LandingCopy = {
         a: "នាំចេញជា PNG, SVG ឬ PDF ឬផ្ញើតំណចែករំលែក ដើម្បីឱ្យអ្នកផ្សេងបើកមើលបាន។",
       },
       {
-        q: "តើអ្វីទៅជាសកម្មភាព AI មួយ?",
-        a: "ការបង្កើតដ្យាក្រាម ឬការស្នើឱ្យជំនួយការ AI កែវា គឺជាសកម្មភាពមួយ។ ការផ្លាស់ទីរាង ការប្តូររចនាប័ទ្ម ការនាំចេញ និងការរៀបប្លង់ និងការពិនិត្យដោយស្វ័យប្រវត្តិ មិនប្រើសកម្មភាពណាមួយទេ។",
+        q: "តើក្រេឌីតមួយអាចប្រើធ្វើអ្វីបាន?",
+        a: "ការបង្កើតដ្យាក្រាម ឬការកែម្តងដោយជំនួយការ AI ប្រើ 1 ក្រេឌីត។ ការអានគំនូរព្រាង ឬរូបថត ឬការសរសេរឯកសារ ប្រើ 2 ក្រេឌីត។ ការផ្លាស់ទីរាង ការប្តូររចនាប័ទ្ម ការនាំចេញ និងការរៀបប្លង់ និងការពិនិត្យដោយស្វ័យប្រវត្តិ គឺឥតគិតថ្លៃ។",
       },
       {
-        q: "តើមានអ្វីកើតឡើង បើខ្ញុំប្រើសកម្មភាព AI អស់?",
-        a: "គ្មានអ្វីត្រូវបានចាក់សោទេ។ អ្នកអាចបន្តកែ និងនាំចេញដោយដៃ ហើយសកម្មភាព AI របស់អ្នកនឹងបំពេញឡើងវិញនៅដើមខែបន្ទាប់។ អ្នកក៏អាចដំឡើងគម្រោងបានគ្រប់ពេល។",
+        q: "តើមានអ្វីកើតឡើង បើខ្ញុំប្រើក្រេឌីតអស់?",
+        a: "គ្មានអ្វីត្រូវបានចាក់សោទេ។ អ្នកអាចបន្តកែ និងនាំចេញដោយដៃ ហើយបញ្ចូលក្រេឌីតបានគ្រប់ពេល ដោយស្កេន KHQR ជាមួយ ABA, ACLEDA, Wing ឬកម្មវិធី Bakong ណាមួយ។ ក្រេឌីតមិនផុតកំណត់ទេ។",
       },
     ],
   },
   closing: {
     title: "រៀបរាប់ដំណើរការដែលអ្នកកំពុងធ្វើឥឡូវនេះ។",
-    body: "គម្រោងឥតគិតថ្លៃរួមបញ្ចូលសកម្មភាព AI 15 ក្នុងមួយខែ និងកម្មវិធីកែសម្រួលពេញលេញ។",
+    body: "គណនីថ្មីនីមួយៗទទួលបានក្រេឌីតឥតគិតថ្លៃ 20 និងកម្មវិធីកែសម្រួលពេញលេញ។",
   },
 };
 
