@@ -55,7 +55,7 @@ export function ExportMenu({ doc }: { doc: DiagramDoc }) {
   return (
     <div ref={rootRef} style={{ position: "relative" }}>
       <button
-        className="inline-flex items-center justify-center gap-[7px] rounded-[7px] border border-line bg-surface px-[11px] py-[7px] text-[12.5px] font-[520] text-ink transition-colors hover:border-line-strong hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px] [&_svg]:text-slate"
+        className="inline-flex items-center justify-center gap-[7px] rounded-[7px] border border-line bg-surface px-[11px] py-[7px] text-[12.5px] font-[550] text-ink transition-colors hover:border-line-strong hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-[15px] [&_svg]:text-slate"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >

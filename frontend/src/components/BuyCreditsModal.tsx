@@ -7,9 +7,10 @@ import { useAuth } from "../store/useAuth";
 import { useBilling } from "../store/useBilling";
 import { CheckCircle, Download, Sparkles, X } from "./icons";
 
-/** How often an open QR asks the server whether Bakong has seen the payment.
- *  Bakong usually reports a transaction within a few seconds of the scan. */
-const POLL_MS = 3000;
+/** How often an open QR asks *our* server about the payment. The server
+ *  decides how often it really asks Bakong (whose API is rate-limited), so
+ *  this can stay quick without costing anything. */
+const POLL_MS = 5000;
 
 /** KHQR's own brand red, for the header band of the payment card — the same
  *  band every Cambodian banking app shows, so the QR is recognisable as one
@@ -48,6 +49,7 @@ export function BuyCreditsModal() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [qrImage, setQrImage] = useState<string | null>(null);
   const [busyPack, setBusyPack] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -113,6 +115,20 @@ export function BuyCreditsModal() {
       window.clearInterval(tick);
     };
   }, [pending, paymentId, setCredits]);
+
+  const checkNow = useCallback(async () => {
+    if (!paymentId) return;
+    setChecking(true);
+    try {
+      const next = await api.payment(paymentId, true);
+      setPayment(next);
+      setCredits(next.balance);
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setChecking(false);
+    }
+  }, [paymentId, setCredits]);
 
   const buy = useCallback(async (pack: CreditPack) => {
     setBusyPack(pack.id);
@@ -216,8 +232,23 @@ export function BuyCreditsModal() {
                 <span className="inline-block size-2 animate-pulse rounded-full bg-green" />
                 Waiting for payment · expires in {remaining(payment.expires_at, now)}
               </p>
+              {payment.check_delayed && (
+                <p className="mb-0 mt-2 max-w-[340px] text-center text-[12.5px] leading-[1.6] text-slate">
+                  Payment confirmation is delayed right now. If you've already paid, your
+                  credits are safe — they'll be added automatically, or when you next open
+                  this window.
+                </p>
+              )}
 
-              <div className="mt-4 flex gap-2">
+              <button
+                className="mt-4 cursor-pointer rounded-lg border border-green bg-green px-5 py-2 text-[13.5px] font-semibold text-on-accent hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void checkNow()}
+                disabled={checking}
+              >
+                {checking ? "Checking…" : "I've paid — check now"}
+              </button>
+
+              <div className="mt-3 flex gap-2">
                 {qrImage && (
                   // On a phone you can't scan your own screen: save the QR,
                   // then open it from the banking app's "scan from gallery".

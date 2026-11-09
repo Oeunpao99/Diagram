@@ -349,6 +349,9 @@ export interface Payment {
   qr: string;
   merchant_name: string;
   expires_at: string;
+  /** Bakong can't be asked right now (daily allowance used up): the payment
+   *  is safe and will be credited once checks resume. */
+  check_delayed: boolean;
   /** Account balance after this check. */
   balance: number;
 }

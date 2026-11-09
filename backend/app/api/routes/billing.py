@@ -8,6 +8,13 @@ the account and answers status "paid" with the new balance.
 Payment is confirmed by polling Bakong rather than by a webhook because
 Bakong's open API has none; the poll is driven by the open payment window, so
 nothing runs in the background when nobody is paying.
+
+Bakong allows a standard token only ~100 requests a day, so the client may
+poll this server as often as it likes but the server asks Bakong sparingly
+(_due): every 15s for a QR's first two minutes, then once a minute, and not
+at all for an hour after Bakong says the allowance is used up. Opening the
+billing dialog re-checks the caller's recent pending payments, so a payment
+made while checks were paused is still credited later.
 """
 
 from __future__ import annotations
@@ -39,6 +46,20 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 QR_LIFETIME = timedelta(minutes=15)
 SETTLE_GRACE = timedelta(minutes=5)
 
+# How often we're willing to ask Bakong about one payment (see module doc).
+FAST_PHASE = timedelta(minutes=2)
+FAST_GAP = timedelta(seconds=15)
+SLOW_GAP = timedelta(seconds=60)
+FORCE_GAP = timedelta(seconds=5)  # "I've paid — check now"
+LIMIT_PAUSE = timedelta(hours=1)
+# Pending payments this recent are re-checked when the billing dialog opens.
+RECHECK_WINDOW = timedelta(hours=48)
+
+# In-process state. One API process serves the app, so a dict is enough; with
+# several workers each would just keep its own (slightly more Bakong calls).
+_last_checked: dict[uuid.UUID, datetime] = {}
+_paused_until: datetime | None = None
+
 
 class PackOut(BaseModel):
     id: str
@@ -69,6 +90,9 @@ class PaymentOut(BaseModel):
     qr: str
     merchant_name: str
     expires_at: datetime
+    # True while Bakong can't be asked (daily allowance used up, or down): the
+    # payment is still safe and will be credited once checks resume.
+    check_delayed: bool = False
     # The account's balance after this check — lets the client update the
     # credit badge the moment a payment lands, without a second request.
     balance: int
@@ -91,7 +115,7 @@ async def _balance(db: AsyncSession, user_id: uuid.UUID) -> int:
     return (await db.get(User, user_id, populate_existing=True)).credits
 
 
-def _out(payment: Payment, balance: int) -> PaymentOut:
+def _out(payment: Payment, balance: int, *, delayed: bool = False) -> PaymentOut:
     return PaymentOut(
         id=payment.id,
         pack=payment.pack,
@@ -102,12 +126,86 @@ def _out(payment: Payment, balance: int) -> PaymentOut:
         qr=payment.qr,
         merchant_name=settings.bakong_merchant_name,
         expires_at=payment.expires_at,
+        check_delayed=delayed,
         balance=balance,
     )
 
 
+def _due(payment: Payment, now: datetime, *, force: bool) -> bool:
+    """Whether this poll should actually spend a Bakong request."""
+    if _paused_until and now < _paused_until:
+        return False
+    last = _last_checked.get(payment.id)
+    if last is None:
+        return True
+    if force:
+        gap = FORCE_GAP
+    elif now - payment.created_at < FAST_PHASE:
+        gap = FAST_GAP
+    else:
+        gap = SLOW_GAP
+    return now - last >= gap
+
+
+async def _reconcile(db: AsyncSession, payment: Payment, *, force: bool = False) -> bool:
+    """Ask Bakong about a pending payment if it's due, settling or expiring
+    it on a definite answer. Returns True if the check is being held back
+    (allowance used up / Bakong unreachable), so the client can say so."""
+    global _paused_until
+    if payment.status != "pending":
+        return False
+    now = datetime.now(UTC)
+    if not _due(payment, now, force=force):
+        return bool(_paused_until and now < _paused_until)
+    _last_checked[payment.id] = now
+
+    try:
+        tx = await bakong.check_transaction(payment.md5)
+    except bakong.BakongLimitError as exc:
+        _paused_until = now + LIMIT_PAUSE
+        log.error("Bakong allowance used up; pausing payment checks for an hour: %s", exc)
+        return True
+    except bakong.BakongError as exc:
+        # Unknown, not "unpaid": leave it pending and never expire on this.
+        log.warning("Bakong check failed for payment %s: %s", payment.id, exc)
+        return True
+
+    if tx is not None and _matches(payment, tx):
+        await settle_payment(db, payment, bakong_hash=tx.hash, payer_account=tx.from_account)
+        _last_checked.pop(payment.id, None)
+    elif tx is not None:
+        # Paid, but not what we asked for (wrong amount/account) — never
+        # credit it; leave it pending and log it for a human to reconcile.
+        log.error(
+            "Payment %s md5 matched a transaction that doesn't match the order: %s",
+            payment.id,
+            tx,
+        )
+    elif now > payment.expires_at + SETTLE_GRACE:
+        # Bakong said definitively: no such transaction, and the QR is dead.
+        payment.status = "expired"
+        await db.commit()
+        _last_checked.pop(payment.id, None)
+    await db.refresh(payment)
+    return False
+
+
 @router.get("", response_model=BillingOut)
 async def billing(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)):
+    # Catch up on payments made while nobody was polling (window closed,
+    # checks paused): opening the dialog is the natural moment to look.
+    if settings.payments_enabled:
+        recent = (
+            await db.execute(
+                select(Payment).where(
+                    Payment.user_id == user.id,
+                    Payment.status == "pending",
+                    Payment.created_at > datetime.now(UTC) - RECHECK_WINDOW,
+                )
+            )
+        ).scalars()
+        for payment in list(recent):
+            await _reconcile(db, payment)
     return BillingOut(
         credits=await _balance(db, user.id),
         payments_enabled=settings.payments_enabled,
@@ -166,6 +264,7 @@ async def checkout(
 @router.get("/payments/{payment_id}", response_model=PaymentOut)
 async def payment_status(
     payment_id: uuid.UUID,
+    force: bool = False,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -177,31 +276,8 @@ async def payment_status(
     if payment is None:
         raise HTTPException(404, "Payment not found.")
 
-    if payment.status == "pending":
-        now = datetime.now(UTC)
-        try:
-            tx = await bakong.check_transaction(payment.md5)
-        except bakong.BakongError as exc:
-            # Don't fail the poll — the client just asks again in a moment.
-            log.warning("Bakong check failed for payment %s: %s", payment.id, exc)
-            tx = None
-
-        if tx is not None and _matches(payment, tx):
-            await settle_payment(db, payment, bakong_hash=tx.hash, payer_account=tx.from_account)
-        elif tx is not None:
-            # Paid, but not what we asked for (wrong amount/account) — never
-            # credit it; leave it pending and log it for a human to reconcile.
-            log.error(
-                "Payment %s md5 matched a transaction that doesn't match the order: %s",
-                payment.id,
-                tx,
-            )
-        elif now > payment.expires_at + SETTLE_GRACE:
-            payment.status = "expired"
-            await db.commit()
-        await db.refresh(payment)
-
-    return _out(payment, await _balance(db, user.id))
+    delayed = await _reconcile(db, payment, force=force)
+    return _out(payment, await _balance(db, user.id), delayed=delayed)
 
 
 def _matches(payment: Payment, tx: bakong.Transaction) -> bool:

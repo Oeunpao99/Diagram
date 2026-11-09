@@ -445,7 +445,10 @@ export const api = {
 
   checkout: (pack: string) => post<Payment>("/billing/checkout", { pack }),
 
-  payment: (id: string) => get<Payment>(`/billing/payments/${id}`),
+  /** `force`: the user says they've paid — ask Bakong now rather than on
+   *  the server's usual (rate-limited) schedule. */
+  payment: (id: string, force = false) =>
+    get<Payment>(`/billing/payments/${id}${force ? "?force=true" : ""}`),
 };
 
 export { ApiError };

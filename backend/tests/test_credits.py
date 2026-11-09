@@ -16,6 +16,15 @@ from app.models import Payment, User
 from app.services import bakong, credits
 
 
+@pytest.fixture(autouse=True)
+def _fresh_throttle(monkeypatch):
+    """Each test starts with no remembered checks and no limit pause."""
+    monkeypatch.setattr(billing, "_last_checked", {})
+    monkeypatch.setattr(billing, "_paused_until", None)
+    monkeypatch.setattr(settings, "bakong_account_id", settings.bakong_account_id or "kumnous@aclb")
+    monkeypatch.setattr(settings, "bakong_api_token", settings.bakong_api_token or "test-token")
+
+
 async def _user(db, balance: int | None = None) -> User:
     user = User(email=f"credits-{uuid.uuid4()}@example.com", name="Credit Tester")
     if balance is not None:
@@ -120,8 +129,8 @@ async def test_paid_payment_credits_exactly_once(db, monkeypatch):
             return _tx(to=settings.bakong_account_id)
 
         monkeypatch.setattr(bakong, "check_transaction", paid)
-        first = await billing.payment_status(payment.id, user, db)
-        second = await billing.payment_status(payment.id, user, db)
+        first = await billing.payment_status(payment.id, user=user, db=db)
+        second = await billing.payment_status(payment.id, user=user, db=db)
         assert first.status == "paid" and second.status == "paid"
         assert second.balance == 100
         assert await _balance(db, user_id) == 100
@@ -148,7 +157,7 @@ async def test_mismatched_transaction_never_credits(db, monkeypatch, tx):
         monkeypatch.setattr(bakong, "check_transaction", paid)
         # Pretend payments are configured so the account check can apply.
         monkeypatch.setattr(settings, "bakong_account_id", "kumnous@aclb")
-        out = await billing.payment_status(payment.id, user, db)
+        out = await billing.payment_status(payment.id, user=user, db=db)
         assert out.status == "pending"
         assert await _balance(db, user_id) == 0
     finally:
@@ -165,7 +174,7 @@ async def test_unpaid_payment_expires_after_grace(db, monkeypatch):
             return None
 
         monkeypatch.setattr(bakong, "check_transaction", unpaid)
-        out = await billing.payment_status(payment.id, user, db)
+        out = await billing.payment_status(payment.id, user=user, db=db)
         assert out.status == "expired"
         assert await _balance(db, user_id) == 0
     finally:
@@ -182,7 +191,7 @@ async def test_bakong_outage_leaves_payment_pending(db, monkeypatch):
             raise bakong.BakongError("unreachable")
 
         monkeypatch.setattr(bakong, "check_transaction", down)
-        out = await billing.payment_status(payment.id, user, db)
+        out = await billing.payment_status(payment.id, user=user, db=db)
         assert out.status == "pending"
     finally:
         await _cleanup(db, user_id)
@@ -195,8 +204,70 @@ async def test_cannot_see_someone_elses_payment(db):
     try:
         payment = await _pending_payment(db, owner_id)
         with pytest.raises(Exception) as info:
-            await billing.payment_status(payment.id, other, db)
+            await billing.payment_status(payment.id, user=other, db=db)
         assert getattr(info.value, "status_code", None) == 404
     finally:
         await _cleanup(db, owner_id)
         await _cleanup(db, other_id)
+
+
+async def test_limit_error_pauses_checks_and_never_expires(db, monkeypatch):
+    """Over Bakong's daily allowance the answer is unknown, not "unpaid": the
+    payment must stay pending even past its expiry, and we stop asking."""
+    user = await _user(db, balance=0)
+    user_id = user.id
+    calls = 0
+
+    async def limited(_md5):
+        nonlocal calls
+        calls += 1
+        raise bakong.BakongLimitError("Daily request limit of 100 exceeded.")
+
+    try:
+        payment = await _pending_payment(db, user_id, expired=True)
+        monkeypatch.setattr(bakong, "check_transaction", limited)
+        first = await billing.payment_status(payment.id, user=user, db=db)
+        second = await billing.payment_status(payment.id, user=user, db=db, force=True)
+        assert first.status == second.status == "pending"
+        assert first.check_delayed and second.check_delayed
+        assert calls == 1  # paused after the first limit answer
+    finally:
+        await _cleanup(db, user_id)
+
+
+async def test_polls_are_throttled(db, monkeypatch):
+    user = await _user(db, balance=0)
+    user_id = user.id
+    calls = 0
+
+    async def unpaid(_md5):
+        nonlocal calls
+        calls += 1
+        return None
+
+    try:
+        payment = await _pending_payment(db, user_id)
+        monkeypatch.setattr(bakong, "check_transaction", unpaid)
+        for _ in range(5):  # a browser polling every few seconds
+            await billing.payment_status(payment.id, user=user, db=db)
+        assert calls == 1
+    finally:
+        await _cleanup(db, user_id)
+
+
+async def test_opening_billing_credits_a_payment_made_while_paused(db, monkeypatch):
+    user = await _user(db, balance=0)
+    user_id = user.id
+    try:
+        payment = await _pending_payment(db, user_id, expired=True)
+
+        async def paid(_md5):
+            return _tx(to=settings.bakong_account_id)
+
+        monkeypatch.setattr(bakong, "check_transaction", paid)
+        out = await billing.billing(user=user, db=db)
+        assert out.credits == 100
+        stored = (await db.execute(select(Payment).where(Payment.id == payment.id))).scalar_one()
+        assert stored.status == "paid"
+    finally:
+        await _cleanup(db, user_id)

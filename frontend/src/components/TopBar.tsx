@@ -191,7 +191,7 @@ export function TopBar() {
           </span>
           <span className="flex items-center gap-[3px] text-[13.5px] font-[650] tracking-[-0.01em]">
             Kumnous-គំនូស
-            <span className="ml-1.5 border-l border-line pl-2 text-[11px] font-[450] text-slate-soft">
+            <span className="ml-1.5 border-l border-line pl-2 text-[11.5px] font-medium text-slate-soft">
               editable diagrams
             </span>
           </span>
@@ -358,7 +358,7 @@ export function TopBar() {
         <span className="h-5 w-px bg-line" />
 
         <button
-          className="inline-flex items-center justify-center gap-[7px] rounded-lg border border-green bg-green px-3.5 py-1.5 text-[12.5px] font-semibold text-on-accent transition-colors hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5"
+          className="inline-flex items-center justify-center gap-[7px] rounded-[7px] border border-green bg-green px-[11px] py-[7px] text-[12.5px] font-[550] text-on-accent transition-colors hover:bg-green-strong disabled:cursor-not-allowed disabled:opacity-45 [&_svg]:size-3.5"
           onClick={focusCopilot}
           disabled={busy !== null}
         >
